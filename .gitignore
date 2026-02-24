@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Data files (keep structure, ignore large captures)
+data/*.raw
+data/*.iq
+data/*.npy
+!data/.gitkeep
+
+# Matplotlib output
+*.png
+
+# Jupyter
+.ipynb_checkpoints/
+rf-sentinel-project-plan.md
+antena.txt
+questions.txt
+questions.txt2
