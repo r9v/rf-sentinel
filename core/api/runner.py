@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import time
 import uuid
 import logging
@@ -146,6 +147,8 @@ class JobRunner:
             job.duration_s = round(time.time() - t0, 2)
             _emit(job.id, f"ERROR: {e}")
             logger.error(traceback.format_exc())
+        finally:
+            gc.collect()
 
     def _real_psd(self, center_hz: float, sample_rate: float,
                   duration: float, gain: float):
@@ -270,6 +273,8 @@ class JobRunner:
             job.duration_s = round(time.time() - t0, 2)
             _emit(job.id, f"ERROR: {e}")
             logger.error(traceback.format_exc())
+        finally:
+            gc.collect()
 
     def _real_waterfall(self, center_hz: float, sample_rate: float,
                         duration: float, gain: float):
@@ -326,6 +331,20 @@ class JobRunner:
             center_freq_mhz=fc_mhz,
         )
 
+    @staticmethod
+    def _downsample_2d(arr: np.ndarray, max_freq: int = 2048, max_time: int = 1024) -> np.ndarray:
+        """Downsample a 2D array (freq x time) by block-averaging."""
+        nf, nt = arr.shape
+        step_f = max(1, nf // max_freq)
+        step_t = max(1, nt // max_time)
+        if step_f > 1 or step_t > 1:
+            # Trim to exact multiple
+            nf_trim = (nf // step_f) * step_f
+            nt_trim = (nt // step_t) * step_t
+            arr = arr[:nf_trim, :nt_trim]
+            arr = arr.reshape(nf_trim // step_f, step_f, nt_trim // step_t, step_t).mean(axis=(1, 3))
+        return arr
+
     def _render_waterfall_plot(self, data, params: dict, path: Path) -> None:
         from matplotlib.colors import Normalize
 
@@ -333,6 +352,17 @@ class JobRunner:
         times = data.times if hasattr(data, 'times') else data["times"]
         power = data.power_db if hasattr(data, 'power_db') else data["power_db"]
         psd = data.mean_psd_db if hasattr(data, 'mean_psd_db') else data["mean_psd_db"]
+
+        # Downsample for rendering
+        power_ds = self._downsample_2d(power, max_freq=2048, max_time=1024)
+        nf_ds, nt_ds = power_ds.shape
+        freqs_ds = np.linspace(freqs[0], freqs[-1], nf_ds)
+        times_ds = np.linspace(times[0], times[-1], nt_ds)
+
+        # Downsample PSD line too
+        step_psd = max(1, len(psd) // 2048)
+        psd_ds = psd[:len(psd) // step_psd * step_psd].reshape(-1, step_psd).mean(axis=1)
+        freqs_psd = np.linspace(freqs[0], freqs[-1], len(psd_ds))
 
         fig, (ax_psd, ax_wf) = plt.subplots(
             2, 1, figsize=(14, 8),
@@ -347,18 +377,18 @@ class JobRunner:
             for spine in ax.spines.values():
                 spine.set_color("#2a2a3a")
 
-        ax_psd.plot(freqs, psd, linewidth=0.8, color="#00d4ff")
-        ax_psd.fill_between(freqs, np.min(psd), psd, alpha=0.15, color="#00d4ff")
+        ax_psd.plot(freqs_psd, psd_ds, linewidth=0.8, color="#00d4ff")
+        ax_psd.fill_between(freqs_psd, np.min(psd_ds), psd_ds, alpha=0.15, color="#00d4ff")
         ax_psd.set_ylabel("Power [dB]", color="#a0a0a0")
         ax_psd.set_title(
             f"Waterfall — {params['start_mhz']:.1f}–{params['stop_mhz']:.1f} MHz",
             color="#e0e0e0", fontsize=13, fontweight="bold",
         )
 
-        vmin = np.percentile(power, 5)
-        vmax = np.percentile(power, 99)
+        vmin = np.percentile(power_ds, 5)
+        vmax = np.percentile(power_ds, 99)
         ax_wf.pcolormesh(
-            freqs, times, power.T,
+            freqs_ds, times_ds, power_ds.T,
             shading="auto", cmap="inferno",
             norm=Normalize(vmin=vmin, vmax=vmax),
         )
@@ -368,3 +398,7 @@ class JobRunner:
         plt.tight_layout()
         fig.savefig(path, dpi=150, facecolor=fig.get_facecolor())
         plt.close(fig)
+
+        # Force memory cleanup
+        del power_ds, freqs_ds, times_ds, psd_ds, freqs_psd
+        gc.collect()

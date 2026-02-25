@@ -17,7 +17,7 @@ class CaptureConfig:
     sample_rate: float = 1.024e6  # Hz
     gain: float = 30.0  # dB
     duration: float = 5.0  # seconds
-    max_samples: int = 5 * 1024 * 1024  # ~40 MB limit
+    max_samples: int = 128 * 1024 * 1024  # ~1 GB limit (128M complex64 samples)
 
 
 @dataclass

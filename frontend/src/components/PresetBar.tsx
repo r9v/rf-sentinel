@@ -2,6 +2,7 @@ interface Preset {
   label: string;
   startMhz: number;
   stopMhz: number;
+  antenna?: string;
 }
 
 interface Props {
@@ -19,28 +20,28 @@ const PRESET_GROUPS: PresetGroup[] = [
   {
     group: 'Broadcast & Utility',
     presets: [
-      { label: 'FM Radio',  startMhz: 87.5,   stopMhz: 108.0 },
-      { label: 'Airband',   startMhz: 118.0,   stopMhz: 137.0 },
-      { label: 'PMR446',    startMhz: 446.0,   stopMhz: 446.2 },
-      { label: 'ADS-B',     startMhz: 1089.0,  stopMhz: 1091.0 },
+      { label: 'FM Radio',  startMhz: 87.5,   stopMhz: 108.0,  antenna: 'Large, 4 sections (~87 MHz)' },
+      { label: 'Airband',   startMhz: 118.0,   stopMhz: 137.0,  antenna: 'Large, 3 sections (~115 MHz)' },
+      { label: 'PMR446',    startMhz: 446.0,   stopMhz: 446.2,  antenna: 'Small, 4 sections (~445 MHz)' },
+      { label: 'ADS-B',     startMhz: 1089.0,  stopMhz: 1091.0, antenna: 'Small, 1 section (~1030 MHz)' },
     ],
   },
   {
     group: 'Ham Bands',
     presets: [
-      { label: '10m',   startMhz: 28.0,    stopMhz: 29.7 },
-      { label: '6m',    startMhz: 50.0,    stopMhz: 54.0 },
-      { label: '2m',    startMhz: 144.0,   stopMhz: 148.0 },
-      { label: '70cm',  startMhz: 430.0,   stopMhz: 440.0 },
-      { label: '23cm',  startMhz: 1240.0,  stopMhz: 1300.0 },
+      { label: '10m',   startMhz: 28.0,    stopMhz: 29.7,   antenna: 'Large, 5 sections (~70 MHz)' },
+      { label: '6m',    startMhz: 50.0,    stopMhz: 54.0,   antenna: 'Large, 5 sections (~70 MHz)' },
+      { label: '2m',    startMhz: 144.0,   stopMhz: 148.0,  antenna: 'Large, 3 sections (~115 MHz)' },
+      { label: '70cm',  startMhz: 430.0,   stopMhz: 440.0,  antenna: 'Small, 4 sections (~445 MHz)' },
+      { label: '23cm',  startMhz: 1240.0,  stopMhz: 1300.0, antenna: 'Small, 1 section (~1030 MHz)' },
     ],
   },
   {
     group: 'IoT & ISM',
     presets: [
-      { label: '433 ISM',   startMhz: 433.0,   stopMhz: 434.8 },
-      { label: '868 LoRa',  startMhz: 867.0,   stopMhz: 869.0 },
-      { label: 'GSM 900',   startMhz: 935.0,   stopMhz: 960.0 },
+      { label: '433 ISM',   startMhz: 433.0,   stopMhz: 434.8, antenna: 'Small, 4 sections (~445 MHz)' },
+      { label: '868 LoRa',  startMhz: 867.0,   stopMhz: 869.0, antenna: 'Small, 2 sections (~720 MHz)' },
+      { label: 'GSM 900',   startMhz: 935.0,   stopMhz: 960.0, antenna: 'Small, 2 sections (~720 MHz)' },
     ],
   },
 ];
@@ -58,6 +59,7 @@ export default function PresetBar({ activeStart, activeStop, onSelect }: Props) 
               <button
                 key={p.label}
                 onClick={() => onSelect(p.startMhz, p.stopMhz)}
+                title={p.antenna ? `🔌 ${p.antenna}` : undefined}
                 className={`px-2 py-1 text-xs rounded border transition-all
                   ${activeStart === p.startMhz && activeStop === p.stopMhz
                     ? 'border-cyan-500/50 text-cyan-300 bg-cyan-500/10'

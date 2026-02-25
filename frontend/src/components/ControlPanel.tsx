@@ -72,8 +72,17 @@ export default function ControlPanel({ onJobStarted }: Props) {
       {/* Computed info */}
       <div className="flex justify-between text-xs text-gray-500 px-0.5">
         <span>BW: <span className="text-gray-400">{bandwidth.toFixed(1)} MHz</span></span>
-        {mode === 'scan' && numChunks > 1 && (
+        {numChunks > 1 && (
           <span>Chunks: <span className="text-gray-400">{numChunks}</span></span>
+        )}
+        {numChunks > 1 && (
+          <span>Est: <span className="text-gray-400">~{(() => {
+            const total = numChunks * duration;
+            if (total < 60) return `${total.toFixed(0)}s`;
+            const m = Math.floor(total / 60);
+            const s = Math.round(total % 60);
+            return `${m}:${s.toString().padStart(2, '0')}`;
+          })()} total</span></span>
         )}
       </div>
 
@@ -83,7 +92,7 @@ export default function ControlPanel({ onJobStarted }: Props) {
         </div>
       )}
 
-      <ParamSlider label="Duration" value={duration} onChange={setDuration}
+      <ParamSlider label={numChunks > 1 ? 'Duration / chunk' : 'Duration'} value={duration} onChange={setDuration}
         min={0.5} max={30} step={0.5} unit="s" />
 
       <ParamSlider label="Gain" value={gain} onChange={setGain}
