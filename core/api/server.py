@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from core.api.models import (
-    ScanRequest, WaterfallRequest, JobInfo, JobStatus,
+    ScanRequest, WaterfallRequest, LiveRequest, JobInfo, JobStatus,
 )
 from core.api.runner import JobRunner, set_log_callback, PLOTS_DIR
 
@@ -60,9 +60,25 @@ async def _broadcast_log(job_id: str, message: str) -> None:
 _loop: Optional[asyncio.AbstractEventLoop] = None
 
 
+async def _broadcast_raw(payload: str) -> None:
+    """Send a pre-serialized JSON payload to all WebSocket clients."""
+    dead = []
+    for ws in _ws_clients:
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _ws_clients.remove(ws)
+
+
 def _sync_log_callback(job_id: str, message: str) -> None:
     if _loop and _loop.is_running():
-        asyncio.run_coroutine_threadsafe(_broadcast_log(job_id, message), _loop)
+        if job_id == "__spectrum__":
+            # message is already a JSON payload for live spectrum data
+            asyncio.run_coroutine_threadsafe(_broadcast_raw(message), _loop)
+        else:
+            asyncio.run_coroutine_threadsafe(_broadcast_log(job_id, message), _loop)
 
 
 set_log_callback(_sync_log_callback)
@@ -114,6 +130,25 @@ async def start_scan(req: ScanRequest):
 async def start_waterfall(req: WaterfallRequest):
     job = runner.submit_waterfall(req.start_mhz, req.stop_mhz, req.duration, req.gain)
     return {"job_id": job.id, "status": job.status.value}
+
+
+# ── Live endpoints ──────────────────────────────────────
+
+@app.post("/api/live/start")
+async def start_live(req: LiveRequest):
+    runner.start_live(req.start_mhz, req.stop_mhz, req.gain)
+    return {"status": "started", "start_mhz": req.start_mhz, "stop_mhz": req.stop_mhz}
+
+
+@app.post("/api/live/stop")
+async def stop_live():
+    runner.stop_live()
+    return {"status": "stopped"}
+
+
+@app.get("/api/live/status")
+async def live_status():
+    return {"active": runner.live_active}
 
 
 @app.get("/api/jobs")

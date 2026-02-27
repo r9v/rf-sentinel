@@ -9,6 +9,7 @@ export interface LogEntry {
 export function useWebSocket(url: string) {
   const [connected, setConnected] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [lastMessage, setLastMessage] = useState<any>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<number>();
   const disposed = useRef(false);
@@ -39,6 +40,8 @@ export function useWebSocket(url: string) {
             message: data.message,
             timestamp: Date.now(),
           }]);
+        } else if (data.type === 'spectrum') {
+          setLastMessage(data);
         }
       } catch { /* ignore non-JSON */ }
     };
@@ -73,5 +76,5 @@ export function useWebSocket(url: string) {
 
   const clearLogs = useCallback(() => setLogs([]), []);
 
-  return { connected, logs, clearLogs };
+  return { connected, logs, clearLogs, lastMessage };
 }

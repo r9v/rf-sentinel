@@ -30,6 +30,13 @@ class WaterfallRequest(BaseModel):
     gain: float = Field(30.0, ge=0.0, le=50.0)
 
 
+class LiveRequest(BaseModel):
+    """Request to start live spectrum monitoring."""
+    start_mhz: float = Field(97.0, ge=24.0, le=1766.0)
+    stop_mhz: float = Field(99.0, ge=24.0, le=1766.0)
+    gain: float = Field(30.0, ge=0.0, le=50.0)
+
+
 class JobInfo(BaseModel):
     """Job status response."""
     id: str

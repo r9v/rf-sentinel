@@ -1,19 +1,22 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
 import { getStatus, JobInfo } from './api';
 import ControlPanel from './components/ControlPanel';
 import LogConsole from './components/LogConsole';
 import JobList from './components/JobList';
 import ResultView from './components/ResultView';
+import LiveSpectrum, { SpectrumFrame } from './components/LiveSpectrum';
 
 const WS_URL = `ws://${window.location.hostname}:8900/api/ws`;
 
 export default function App() {
-  const { connected, logs, clearLogs } = useWebSocket(WS_URL);
+  const { connected, logs, clearLogs, lastMessage } = useWebSocket(WS_URL);
   const [demoMode, setDemoMode] = useState(false);
   const [serverOnline, setServerOnline] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedJob, setSelectedJob] = useState<JobInfo | null>(null);
+  const [liveActive, setLiveActive] = useState(false);
+  const [liveFrame, setLiveFrame] = useState<SpectrumFrame | null>(null);
 
   useEffect(() => {
     const check = async () => {
@@ -30,9 +33,27 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Handle live spectrum data from WebSocket
+  useEffect(() => {
+    if (lastMessage && lastMessage.type === 'spectrum') {
+      setLiveFrame({
+        freqs_mhz: lastMessage.freqs_mhz,
+        power_db: lastMessage.power_db,
+        peaks: lastMessage.peaks,
+      });
+    }
+  }, [lastMessage]);
+
   const handleJobStarted = () => {
     setRefreshTrigger(n => n + 1);
   };
+
+  const handleLiveToggle = useCallback((active: boolean) => {
+    setLiveActive(active);
+    if (!active) {
+      setLiveFrame(null);
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#0a0e1a] text-gray-100">
@@ -45,6 +66,11 @@ export default function App() {
           <span className="text-xs text-gray-600 font-mono">v0.1.0</span>
         </div>
         <div className="flex items-center gap-3">
+          {liveActive && (
+            <span className="text-xs px-2 py-0.5 rounded bg-red-500/15 text-red-300 font-mono animate-pulse">
+              ● LIVE
+            </span>
+          )}
           {demoMode && (
             <span className="text-xs px-2 py-0.5 rounded bg-yellow-500/15 text-yellow-300 font-mono">
               DEMO
@@ -64,7 +90,11 @@ export default function App() {
         {/* Left sidebar — controls + jobs */}
         <aside className="w-72 border-r border-gray-800 flex flex-col">
           <div className="p-3 border-b border-gray-800/50 flex-shrink-0">
-            <ControlPanel onJobStarted={handleJobStarted} />
+            <ControlPanel
+              onJobStarted={handleJobStarted}
+              liveActive={liveActive}
+              onLiveToggle={handleLiveToggle}
+            />
           </div>
           <div className="flex-1 overflow-y-auto p-3">
             <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Jobs</h3>
@@ -78,9 +108,13 @@ export default function App() {
 
         {/* Main content area */}
         <div className="flex-1 flex flex-col">
-          {/* Result view */}
-          <div className="flex-1 border-b border-gray-800">
-            <ResultView job={selectedJob} />
+          {/* Result view / Live spectrum */}
+          <div className="flex-1 border-b border-gray-800 flex items-center justify-center overflow-hidden">
+            {liveActive || liveFrame ? (
+              <LiveSpectrum frame={liveFrame} width={900} height={400} />
+            ) : (
+              <ResultView job={selectedJob} />
+            )}
           </div>
 
           {/* Console */}

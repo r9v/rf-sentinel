@@ -58,3 +58,28 @@ export async function getJob(id: string): Promise<JobInfo> {
   const res = await fetch(`${API}/api/jobs/${id}`);
   return res.json();
 }
+
+// ── Live mode ──────────────────────────────────────────
+
+export async function startLive(params: {
+  start_mhz: number;
+  stop_mhz: number;
+  gain: number;
+}): Promise<{ status: string; start_mhz: number; stop_mhz: number }> {
+  const res = await fetch(`${API}/api/live/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  return res.json();
+}
+
+export async function stopLive(): Promise<{ status: string }> {
+  const res = await fetch(`${API}/api/live/stop`, { method: 'POST' });
+  return res.json();
+}
+
+export async function getLiveStatus(): Promise<{ active: boolean }> {
+  const res = await fetch(`${API}/api/live/status`);
+  return res.json();
+}

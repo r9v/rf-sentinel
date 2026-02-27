@@ -62,6 +62,8 @@ class JobRunner:
         self.demo_mode = demo_mode
         self.jobs: dict[str, Job] = {}
         self._pool = ThreadPoolExecutor(max_workers=1)
+        self._live_active = False
+        self._live_thread = None
 
     def submit_scan(self, start_mhz: float, stop_mhz: float,
                     duration: float, gain: float) -> Job:
@@ -222,8 +224,7 @@ class JobRunner:
 
         # Annotate peaks
         if peaks:
-            max_labels = 15
-            for i, pk in enumerate(peaks[:max_labels]):
+            for pk in peaks:
                 ax.plot(pk.freq_mhz, pk.power_db, 'v', color='#ff6b35',
                         markersize=6, markeredgecolor='#ff6b35', markeredgewidth=0.5)
                 ax.annotate(
@@ -326,6 +327,153 @@ class JobRunner:
             logger.error(traceback.format_exc())
         finally:
             gc.collect()
+
+    # ── Live mode ────────────────────────────────────────
+
+    def start_live(self, start_mhz: float, stop_mhz: float, gain: float) -> None:
+        """Start continuous spectrum capture."""
+        if self._live_active:
+            self.stop_live()
+
+        from core.dsp import SAMPLE_RATE
+        MAX_BW = SAMPLE_RATE / 1e6  # ~2.048 MHz
+
+        bw = stop_mhz - start_mhz
+        if bw > MAX_BW:
+            # Clamp to max bandwidth from start
+            stop_mhz = start_mhz + MAX_BW
+
+        center_hz = (start_mhz + stop_mhz) / 2 * 1e6
+        bw_hz = (stop_mhz - start_mhz) * 1e6
+        sample_rate = min(max(bw_hz, 0.25e6), SAMPLE_RATE)
+
+        self._live_active = True
+        import threading
+        self._live_thread = threading.Thread(
+            target=self._live_loop,
+            args=(center_hz, sample_rate, gain, start_mhz, stop_mhz),
+            daemon=True,
+        )
+        self._live_thread.start()
+        _emit("live", f"Live started: {start_mhz:.1f}–{stop_mhz:.1f} MHz")
+
+    def stop_live(self) -> None:
+        """Stop continuous spectrum capture."""
+        self._live_active = False
+        if self._live_thread:
+            self._live_thread.join(timeout=3)
+            self._live_thread = None
+        _emit("live", "Live stopped")
+
+    @property
+    def live_active(self) -> bool:
+        return self._live_active
+
+    def _live_loop(self, center_hz: float, sample_rate: float,
+                   gain: float, start_mhz: float, stop_mhz: float) -> None:
+        """Continuous capture loop — runs in a background thread."""
+        import json
+
+        CAPTURE_DURATION = 0.25  # seconds per frame
+        DOWNSAMPLE_POINTS = 1024
+
+        try:
+            if self.demo_mode:
+                self._live_loop_demo(center_hz, sample_rate, start_mhz, stop_mhz,
+                                     CAPTURE_DURATION, DOWNSAMPLE_POINTS)
+                return
+
+            from core.sdr import SDRDevice, CaptureConfig
+            from core.dsp import compute_psd, find_peaks
+
+            config = CaptureConfig(
+                center_freq=center_hz,
+                sample_rate=sample_rate,
+                gain=gain,
+                duration=CAPTURE_DURATION,
+            )
+
+            with SDRDevice() as sdr:
+                while self._live_active:
+                    capture = sdr.capture(config)
+                    result = compute_psd(capture, nfft=2048)
+
+                    # Downsample for transmission
+                    step = max(1, len(result.freqs_mhz) // DOWNSAMPLE_POINTS)
+                    freqs = result.freqs_mhz[::step]
+                    power = result.power_db[::step]
+
+                    peaks = find_peaks(result.freqs_mhz, result.power_db)
+
+                    payload = json.dumps({
+                        "type": "spectrum",
+                        "freqs_mhz": freqs.tolist(),
+                        "power_db": power.tolist(),
+                        "peaks": [
+                            {"freq_mhz": pk.freq_mhz, "power_db": pk.power_db,
+                             "bandwidth_khz": pk.bandwidth_khz}
+                            for pk in peaks
+                        ],
+                    })
+
+                    if _log_callback:
+                        _log_callback("__spectrum__", payload)
+
+        except Exception as e:
+            _emit("live", f"Live error: {e}")
+            logger.error(traceback.format_exc())
+        finally:
+            self._live_active = False
+
+    def _live_loop_demo(self, center_hz, sample_rate, start_mhz, stop_mhz,
+                        duration, downsample_points) -> None:
+        """Demo mode live loop — synthetic data."""
+        import json
+        from core.dsp import find_peaks
+
+        n_points = downsample_points
+        fc_mhz = center_hz / 1e6
+        bw_mhz = sample_rate / 1e6
+        freqs = np.linspace(fc_mhz - bw_mhz / 2, fc_mhz + bw_mhz / 2, n_points)
+
+        # Create some persistent signals
+        persistent_sigs = []
+        for _ in range(np.random.randint(2, 5)):
+            persistent_sigs.append({
+                "freq": fc_mhz + np.random.uniform(-bw_mhz / 3, bw_mhz / 3),
+                "power": np.random.uniform(15, 30),
+                "width": np.random.uniform(0.02, 0.1),
+            })
+
+        while self._live_active:
+            noise = -45 + np.random.normal(0, 2, n_points)
+            for sig in persistent_sigs:
+                noise += sig["power"] * np.exp(
+                    -((freqs - sig["freq"]) ** 2) / (2 * sig["width"] ** 2)
+                )
+
+            # Random transient
+            if np.random.random() < 0.15:
+                t_freq = fc_mhz + np.random.uniform(-bw_mhz / 3, bw_mhz / 3)
+                noise += 20 * np.exp(-((freqs - t_freq) ** 2) / (2 * 0.03 ** 2))
+
+            peaks = find_peaks(freqs, noise)
+
+            payload = json.dumps({
+                "type": "spectrum",
+                "freqs_mhz": freqs.tolist(),
+                "power_db": noise.tolist(),
+                "peaks": [
+                    {"freq_mhz": pk.freq_mhz, "power_db": pk.power_db,
+                     "bandwidth_khz": pk.bandwidth_khz}
+                    for pk in peaks
+                ],
+            })
+
+            if _log_callback:
+                _log_callback("__spectrum__", payload)
+
+            time.sleep(duration)
 
     def _real_waterfall(self, center_hz: float, sample_rate: float,
                         duration: float, gain: float):
@@ -433,8 +581,7 @@ class JobRunner:
 
         # Annotate peaks on PSD subplot
         if peaks:
-            max_labels = 15
-            for pk in peaks[:max_labels]:
+            for pk in peaks:
                 ax_psd.plot(pk.freq_mhz, pk.power_db, 'v', color='#ff6b35',
                             markersize=5, markeredgewidth=0.5)
                 ax_psd.annotate(
