@@ -10,9 +10,8 @@ RTL-SDR based tool for real-time RF spectrum analysis, signal detection, and aut
 # Install Python dependencies
 pip install -r requirements.txt
 
-# Start the backend
-python -m core.api.server --demo    # demo mode (no SDR needed)
-python -m core.api.server           # live mode (SDR required)
+# Start the backend (SDR required)
+python -m core.api.server
 
 # In a second terminal, start the frontend
 cd frontend
@@ -24,7 +23,7 @@ npm run dev
 
 ## Requirements
 
-- **Hardware:** RTL-SDR Blog V4 (or compatible) — not needed for demo mode
+- **Hardware:** RTL-SDR Blog V4 (or compatible)
 - **OS:** Windows 10/11, Linux
 - **Python:** 3.10+
 - **Node.js:** 18+ (for frontend)
@@ -43,7 +42,7 @@ rf-sentinel/
 │   │   └── __init__.py     PSD (Welch method), spectrogram/waterfall generation
 │   └── api/                FastAPI backend for the web dashboard
 │       ├── models.py       Pydantic request/response schemas
-│       ├── runner.py       Background job executor with demo mode
+│       ├── runner.py       Background job executor
 │       └── server.py       REST + WebSocket server, log streaming
 ├── frontend/               React + Vite + Tailwind dashboard
 │   └── src/
@@ -66,7 +65,7 @@ rf-sentinel/
 
 **`core/cli.py`** — Command-line interface with three commands: `scan` (single-band PSD), `waterfall` (spectrogram), and `sweep` (all bands sequentially).
 
-**`core/api/`** — FastAPI backend powering the web dashboard. REST endpoints to launch scan/waterfall/sweep jobs, WebSocket endpoint for real-time log streaming, background thread pool for job execution (one at a time — single SDR dongle), and a demo mode that generates synthetic RF data for development without hardware.
+**`core/api/`** — FastAPI backend powering the web dashboard. REST endpoints to launch scan/waterfall jobs, WebSocket endpoint for real-time log streaming, background thread pool for job execution (one at a time — single SDR dongle).
 
 ### Data Flow
 

@@ -11,7 +11,6 @@ const WS_URL = `ws://${window.location.hostname}:8900/api/ws`;
 
 export default function App() {
   const { connected, logs, clearLogs, lastMessage } = useWebSocket(WS_URL);
-  const [demoMode, setDemoMode] = useState(false);
   const [serverOnline, setServerOnline] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedJob, setSelectedJob] = useState<JobInfo | null>(null);
@@ -22,9 +21,8 @@ export default function App() {
   useEffect(() => {
     const check = async () => {
       try {
-        const s = await getStatus();
+        await getStatus();
         setServerOnline(true);
-        setDemoMode(s.demo_mode);
       } catch {
         setServerOnline(false);
       }
@@ -70,11 +68,6 @@ export default function App() {
           {liveActive && (
             <span className="text-xs px-2 py-0.5 rounded bg-red-500/15 text-red-300 font-mono animate-pulse">
               ● LIVE
-            </span>
-          )}
-          {demoMode && (
-            <span className="text-xs px-2 py-0.5 rounded bg-yellow-500/15 text-yellow-300 font-mono">
-              DEMO
             </span>
           )}
           <div className="flex items-center gap-1.5">

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -23,8 +22,6 @@ logger = logging.getLogger("rfsentinel.server")
 
 # ── App setup ───────────────────────────────────────────
 
-DEMO_MODE = os.environ.get("RFSENTINEL_DEMO", "0") == "1"
-
 app = FastAPI(
     title="RFSentinel",
     description="RF Spectrum Monitoring & Classification",
@@ -38,7 +35,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-runner = JobRunner(demo_mode=DEMO_MODE)
+runner = JobRunner()
 
 # ── WebSocket management ────────────────────────────────
 
@@ -75,7 +72,6 @@ async def _broadcast_raw(payload: str) -> None:
 def _sync_log_callback(job_id: str, message: str) -> None:
     if _loop and _loop.is_running():
         if job_id == "__spectrum__":
-            # message is already a JSON payload for live spectrum data
             asyncio.run_coroutine_threadsafe(_broadcast_raw(message), _loop)
         else:
             asyncio.run_coroutine_threadsafe(_broadcast_log(job_id, message), _loop)
@@ -88,8 +84,7 @@ set_log_callback(_sync_log_callback)
 async def _capture_loop() -> None:
     global _loop
     _loop = asyncio.get_running_loop()
-    mode = "DEMO" if DEMO_MODE else "LIVE (SDR)"
-    logger.info(f"RFSentinel server started — mode: {mode}")
+    logger.info("RFSentinel server started")
 
 
 # ── WebSocket endpoint ──────────────────────────────────
@@ -115,7 +110,6 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 async def get_status():
     return {
         "status": "online",
-        "demo_mode": DEMO_MODE,
         "connected_clients": len(_ws_clients),
     }
 
@@ -192,19 +186,12 @@ app.mount("/api/plots", StaticFiles(directory=str(PLOTS_DIR)), name="plots")
 
 # ── Entry point ─────────────────────────────────────────
 
-def run_server(host: str = "127.0.0.1", port: int = 8900, demo: bool = False) -> None:
+def run_server(host: str = "127.0.0.1", port: int = 8900) -> None:
     import uvicorn
-
-    if demo:
-        os.environ["RFSENTINEL_DEMO"] = "1"
-        global DEMO_MODE
-        DEMO_MODE = True
-        runner.demo_mode = True
 
     print(f"\n  ╔══════════════════════════════════════╗")
     print(f"  ║     RFSentinel — UI Server           ║")
     print(f"  ║     http://{host}:{port}            ║")
-    print(f"  ║     Mode: {'DEMO' if demo or DEMO_MODE else 'LIVE (SDR)':>10}             ║")
     print(f"  ╚══════════════════════════════════════╝\n")
 
     uvicorn.run(app, host=host, port=port, log_level="info")
@@ -213,7 +200,6 @@ def run_server(host: str = "127.0.0.1", port: int = 8900, demo: bool = False) ->
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--demo", action="store_true", help="Run with synthetic data (no SDR)")
     parser.add_argument("--port", type=int, default=8900)
     args = parser.parse_args()
-    run_server(port=args.port, demo=args.demo)
+    run_server(port=args.port)

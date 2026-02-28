@@ -58,8 +58,7 @@ def _emit(job_id: str, msg: str) -> None:
 class JobRunner:
     """Manages background SDR jobs."""
 
-    def __init__(self, demo_mode: bool = False):
-        self.demo_mode = demo_mode
+    def __init__(self):
         self.jobs: dict[str, Job] = {}
         self._pool = ThreadPoolExecutor(max_workers=1)
         self._live_active = False
@@ -108,6 +107,7 @@ class JobRunner:
 
         try:
             from core.dsp import plan_chunks, compute_psd, trim_spectrum, stitch_spectra, SAMPLE_RATE
+            from core.sdr import SDRDevice, CaptureConfig
 
             start_hz = p["start_mhz"] * 1e6
             stop_hz = p["stop_mhz"] * 1e6
@@ -121,12 +121,14 @@ class JobRunner:
                 fc_mhz = fc / 1e6
                 _emit(job.id, f"  [{i+1}/{num_chunks}] Capturing {fc_mhz:.1f} MHz...")
 
-                if self.demo_mode:
-                    data = self._demo_psd(fc, SAMPLE_RATE, p["duration"])
-                else:
-                    data = self._real_psd(fc, SAMPLE_RATE, p["duration"], p["gain"])
+                config = CaptureConfig(
+                    center_freq=fc, sample_rate=SAMPLE_RATE,
+                    duration=p["duration"], gain=p["gain"],
+                )
+                with SDRDevice() as sdr:
+                    capture = sdr.capture(config)
+                data = compute_psd(capture)
 
-                # Trim edges if stitching multiple chunks
                 if num_chunks > 1:
                     data = trim_spectrum(data)
                 segments.append(data)
@@ -169,48 +171,6 @@ class JobRunner:
         finally:
             gc.collect()
 
-    def _real_psd(self, center_hz: float, sample_rate: float,
-                  duration: float, gain: float):
-        from core.sdr import SDRDevice, CaptureConfig
-        from core.dsp import compute_psd
-
-        config = CaptureConfig(
-            center_freq=center_hz,
-            sample_rate=sample_rate,
-            duration=duration,
-            gain=gain,
-        )
-        with SDRDevice() as sdr:
-            capture = sdr.capture(config)
-        return compute_psd(capture)
-
-    def _demo_psd(self, center_hz: float, sample_rate: float, duration: float):
-        """Generate synthetic PSD data for demo mode."""
-        from core.dsp import SpectrumResult
-
-        time.sleep(0.15)  # Simulate capture time
-
-        fc_mhz = center_hz / 1e6
-        bw_mhz = sample_rate / 1e6
-        n_points = 4096
-
-        freqs_mhz = np.linspace(fc_mhz - bw_mhz / 2, fc_mhz + bw_mhz / 2, n_points)
-        noise_floor = -45 + np.random.normal(0, 2, n_points)
-
-        # Random signals
-        for _ in range(np.random.randint(0, 4)):
-            sig_freq = fc_mhz + np.random.uniform(-bw_mhz / 3, bw_mhz / 3)
-            sig_power = np.random.uniform(15, 35)
-            sig_width = np.random.uniform(0.02, 0.15)
-            noise_floor += sig_power * np.exp(-((freqs_mhz - sig_freq) ** 2) / (2 * sig_width ** 2))
-
-        return SpectrumResult(
-            freqs_mhz=freqs_mhz,
-            power_db=noise_floor,
-            center_freq_mhz=fc_mhz,
-            sample_rate=sample_rate,
-        )
-
     def _render_scan_plot(self, data, params: dict, path: Path, peaks=None) -> None:
         fig, ax = plt.subplots(figsize=(14, 4))
         fig.patch.set_facecolor("#0a0e1a")
@@ -222,7 +182,6 @@ class JobRunner:
         ax.plot(freqs, power, linewidth=0.5, color="#00d4ff")
         ax.fill_between(freqs, np.min(power), power, alpha=0.12, color="#00d4ff")
 
-        # Annotate peaks
         if peaks:
             for pk in peaks:
                 ax.plot(pk.freq_mhz, pk.power_db, 'v', color='#ff6b35',
@@ -254,7 +213,7 @@ class JobRunner:
         fig.savefig(path, dpi=150, facecolor=fig.get_facecolor())
         plt.close(fig)
 
-    # ── Waterfall (single capture) ──────────────────────
+    # ── Waterfall (stitched) ────────────────────────────
 
     def _run_waterfall(self, job: Job) -> None:
         job.status = JobStatus.RUNNING
@@ -266,6 +225,7 @@ class JobRunner:
                 plan_chunks, compute_waterfall, trim_waterfall,
                 stitch_waterfalls, SAMPLE_RATE,
             )
+            from core.sdr import SDRDevice, CaptureConfig
 
             start_hz = p["start_mhz"] * 1e6
             stop_hz = p["stop_mhz"] * 1e6
@@ -281,10 +241,13 @@ class JobRunner:
                 fc_mhz = fc / 1e6
                 _emit(job.id, f"  [{i+1}/{num_chunks}] Capturing {fc_mhz:.1f} MHz...")
 
-                if self.demo_mode:
-                    data = self._demo_waterfall(fc, SAMPLE_RATE, p["duration"])
-                else:
-                    data = self._real_waterfall(fc, SAMPLE_RATE, p["duration"], p["gain"])
+                config = CaptureConfig(
+                    center_freq=fc, sample_rate=SAMPLE_RATE,
+                    duration=p["duration"], gain=p["gain"],
+                )
+                with SDRDevice() as sdr:
+                    capture = sdr.capture(config)
+                data = compute_waterfall(capture)
 
                 if num_chunks > 1:
                     data = trim_waterfall(data)
@@ -336,11 +299,10 @@ class JobRunner:
             self.stop_live()
 
         from core.dsp import SAMPLE_RATE
-        MAX_BW = SAMPLE_RATE / 1e6  # ~2.048 MHz
+        MAX_BW = SAMPLE_RATE / 1e6
 
         bw = stop_mhz - start_mhz
         if bw > MAX_BW:
-            # Clamp to max bandwidth from start
             stop_mhz = start_mhz + MAX_BW
 
         center_hz = (start_mhz + stop_mhz) / 2 * 1e6
@@ -373,19 +335,13 @@ class JobRunner:
                    gain: float, start_mhz: float, stop_mhz: float) -> None:
         """Continuous capture loop — runs in a background thread."""
         import json
+        from core.sdr import SDRDevice, CaptureConfig
+        from core.dsp import compute_psd, find_peaks
 
-        CAPTURE_DURATION = 0.25  # seconds per frame
+        CAPTURE_DURATION = 0.25
         DOWNSAMPLE_POINTS = 1024
 
         try:
-            if self.demo_mode:
-                self._live_loop_demo(center_hz, sample_rate, start_mhz, stop_mhz,
-                                     CAPTURE_DURATION, DOWNSAMPLE_POINTS)
-                return
-
-            from core.sdr import SDRDevice, CaptureConfig
-            from core.dsp import compute_psd, find_peaks
-
             config = CaptureConfig(
                 center_freq=center_hz,
                 sample_rate=sample_rate,
@@ -398,7 +354,6 @@ class JobRunner:
                     capture = sdr.capture(config)
                     result = compute_psd(capture, nfft=2048)
 
-                    # Downsample for transmission
                     step = max(1, len(result.freqs_mhz) // DOWNSAMPLE_POINTS)
                     freqs = result.freqs_mhz[::step]
                     power = result.power_db[::step]
@@ -425,110 +380,7 @@ class JobRunner:
         finally:
             self._live_active = False
 
-    def _live_loop_demo(self, center_hz, sample_rate, start_mhz, stop_mhz,
-                        duration, downsample_points) -> None:
-        """Demo mode live loop — synthetic data."""
-        import json
-        from core.dsp import find_peaks
-
-        n_points = downsample_points
-        fc_mhz = center_hz / 1e6
-        bw_mhz = sample_rate / 1e6
-        freqs = np.linspace(fc_mhz - bw_mhz / 2, fc_mhz + bw_mhz / 2, n_points)
-
-        # Create some persistent signals
-        persistent_sigs = []
-        for _ in range(np.random.randint(2, 5)):
-            persistent_sigs.append({
-                "freq": fc_mhz + np.random.uniform(-bw_mhz / 3, bw_mhz / 3),
-                "power": np.random.uniform(15, 30),
-                "width": np.random.uniform(0.02, 0.1),
-            })
-
-        while self._live_active:
-            noise = -45 + np.random.normal(0, 2, n_points)
-            for sig in persistent_sigs:
-                noise += sig["power"] * np.exp(
-                    -((freqs - sig["freq"]) ** 2) / (2 * sig["width"] ** 2)
-                )
-
-            # Random transient
-            if np.random.random() < 0.15:
-                t_freq = fc_mhz + np.random.uniform(-bw_mhz / 3, bw_mhz / 3)
-                noise += 20 * np.exp(-((freqs - t_freq) ** 2) / (2 * 0.03 ** 2))
-
-            peaks = find_peaks(freqs, noise)
-
-            payload = json.dumps({
-                "type": "spectrum",
-                "freqs_mhz": freqs.tolist(),
-                "power_db": noise.tolist(),
-                "peaks": [
-                    {"freq_mhz": pk.freq_mhz, "power_db": pk.power_db,
-                     "bandwidth_khz": pk.bandwidth_khz}
-                    for pk in peaks
-                ],
-            })
-
-            if _log_callback:
-                _log_callback("__spectrum__", payload)
-
-            time.sleep(duration)
-
-    def _real_waterfall(self, center_hz: float, sample_rate: float,
-                        duration: float, gain: float):
-        from core.sdr import SDRDevice, CaptureConfig
-        from core.dsp import compute_waterfall
-
-        config = CaptureConfig(
-            center_freq=center_hz,
-            sample_rate=sample_rate,
-            duration=duration,
-            gain=gain,
-        )
-        with SDRDevice() as sdr:
-            capture = sdr.capture(config)
-        return compute_waterfall(capture)
-
-    def _demo_waterfall(self, center_hz: float, sample_rate: float, duration: float):
-        from core.dsp import WaterfallResult
-
-        _emit("", "[DEMO] Generating synthetic waterfall...")
-        time.sleep(0.5)
-
-        fc_mhz = center_hz / 1e6
-        bw_mhz = sample_rate / 1e6
-        n_freq = 512
-        n_time = 200
-
-        freqs_mhz = np.linspace(fc_mhz - bw_mhz / 2, fc_mhz + bw_mhz / 2, n_freq)
-        times = np.linspace(0, duration, n_time)
-
-        power_db = np.random.normal(-45, 3, (n_freq, n_time))
-
-        for _ in range(np.random.randint(1, 4)):
-            sig_f = fc_mhz + np.random.uniform(-bw_mhz / 3, bw_mhz / 3)
-            sig_w = np.random.uniform(0.02, 0.1)
-            sig_p = np.random.uniform(10, 30)
-            freq_profile = sig_p * np.exp(-((freqs_mhz - sig_f) ** 2) / (2 * sig_w ** 2))
-            power_db += freq_profile[:, np.newaxis]
-
-        # Burst signal
-        burst_f = fc_mhz + np.random.uniform(-bw_mhz / 4, bw_mhz / 4)
-        burst_t = np.random.randint(50, 150)
-        burst_dur = np.random.randint(10, 40)
-        freq_mask = np.exp(-((freqs_mhz - burst_f) ** 2) / (2 * 0.05 ** 2))
-        power_db[:, burst_t:burst_t + burst_dur] += 20 * freq_mask[:, np.newaxis]
-
-        mean_psd_db = np.mean(power_db, axis=1)
-
-        return WaterfallResult(
-            freqs_mhz=freqs_mhz,
-            times=times,
-            power_db=power_db,
-            mean_psd_db=mean_psd_db,
-            center_freq_mhz=fc_mhz,
-        )
+    # ── Helpers ──────────────────────────────────────────
 
     @staticmethod
     def _downsample_2d(arr: np.ndarray, max_freq: int = 2048, max_time: int = 1024) -> np.ndarray:
@@ -537,7 +389,6 @@ class JobRunner:
         step_f = max(1, nf // max_freq)
         step_t = max(1, nt // max_time)
         if step_f > 1 or step_t > 1:
-            # Trim to exact multiple
             nf_trim = (nf // step_f) * step_f
             nt_trim = (nt // step_t) * step_t
             arr = arr[:nf_trim, :nt_trim]
@@ -552,13 +403,11 @@ class JobRunner:
         power = data.power_db if hasattr(data, 'power_db') else data["power_db"]
         psd = data.mean_psd_db if hasattr(data, 'mean_psd_db') else data["mean_psd_db"]
 
-        # Downsample for rendering
         power_ds = self._downsample_2d(power, max_freq=2048, max_time=1024)
         nf_ds, nt_ds = power_ds.shape
         freqs_ds = np.linspace(freqs[0], freqs[-1], nf_ds)
         times_ds = np.linspace(times[0], times[-1], nt_ds)
 
-        # Downsample PSD line too
         step_psd = max(1, len(psd) // 2048)
         psd_ds = psd[:len(psd) // step_psd * step_psd].reshape(-1, step_psd).mean(axis=1)
         freqs_psd = np.linspace(freqs[0], freqs[-1], len(psd_ds))
@@ -579,7 +428,6 @@ class JobRunner:
         ax_psd.plot(freqs_psd, psd_ds, linewidth=0.8, color="#00d4ff")
         ax_psd.fill_between(freqs_psd, np.min(psd_ds), psd_ds, alpha=0.15, color="#00d4ff")
 
-        # Annotate peaks on PSD subplot
         if peaks:
             for pk in peaks:
                 ax_psd.plot(pk.freq_mhz, pk.power_db, 'v', color='#ff6b35',
@@ -614,6 +462,5 @@ class JobRunner:
         fig.savefig(path, dpi=150, facecolor=fig.get_facecolor())
         plt.close(fig)
 
-        # Force memory cleanup
         del power_ds, freqs_ds, times_ds, psd_ds, freqs_psd
         gc.collect()

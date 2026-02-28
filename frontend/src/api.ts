@@ -16,7 +16,7 @@ export interface JobInfo {
   duration_s: number | null;
 }
 
-export async function getStatus(): Promise<{ status: string; demo_mode: boolean }> {
+export async function getStatus(): Promise<{ status: string }> {
   const res = await fetch(`${API}/api/status`);
   return res.json();
 }
