@@ -27,7 +27,7 @@ def client_count() -> int:
 
 
 async def _broadcast(payload: str) -> None:
-    """Send a payload to all connected WebSocket clients."""
+    """Send a text payload to all connected WebSocket clients."""
     dead = []
     for ws in _ws_clients:
         try:
@@ -36,6 +36,20 @@ async def _broadcast(payload: str) -> None:
             dead.append(ws)
     for ws in dead:
         _ws_clients.remove(ws)
+
+
+async def _broadcast_bytes(data: bytes) -> None:
+    """Send binary data to all connected WebSocket clients."""
+    dead = []
+    for ws in _ws_clients:
+        try:
+            await ws.send_bytes(data)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _ws_clients.remove(ws)
+    if dead:
+        logger.debug("audio broadcast: dropped %d dead clients", len(dead))
 
 
 def log_callback(job_id: str, message: str) -> None:
@@ -47,6 +61,15 @@ def log_callback(job_id: str, message: str) -> None:
     else:
         payload = json.dumps({"type": "log", "job_id": job_id, "message": message})
     asyncio.run_coroutine_threadsafe(_broadcast(payload), _loop)
+
+
+def audio_callback(data: bytes) -> None:
+    """Thread-safe callback to send binary audio PCM via WebSocket."""
+    if not (_loop and _loop.is_running()):
+        return
+    if not _ws_clients:
+        return
+    asyncio.run_coroutine_threadsafe(_broadcast_bytes(data), _loop)
 
 
 @router.websocket("/api/ws")

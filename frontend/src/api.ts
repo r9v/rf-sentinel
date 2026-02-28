@@ -65,6 +65,8 @@ export async function startLive(params: {
   start_mhz: number;
   stop_mhz: number;
   gain: number;
+  audio_enabled?: boolean;
+  demod_mode?: string;
 }): Promise<{ status: string; start_mhz: number; stop_mhz: number }> {
   const res = await fetch(`${API}/api/live/start`, {
     method: 'POST',
@@ -79,7 +81,19 @@ export async function stopLive(): Promise<{ status: string }> {
   return res.json();
 }
 
-export async function getLiveStatus(): Promise<{ active: boolean }> {
+export async function toggleAudio(params: {
+  enabled: boolean;
+  demod_mode: string;
+}): Promise<{ audio_enabled: boolean; demod_mode: string }> {
+  const res = await fetch(`${API}/api/live/audio`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  return res.json();
+}
+
+export async function getLiveStatus(): Promise<{ active: boolean; audio_enabled: boolean }> {
   const res = await fetch(`${API}/api/live/status`);
   return res.json();
 }

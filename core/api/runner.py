@@ -35,8 +35,9 @@ class Job:
     duration_s: Optional[float] = None
 
 
-# Global log callback — set by the server to push messages via WebSocket
+# Global callbacks — set by the server to push messages via WebSocket
 _log_callback: Optional[Callable[[str, str], None]] = None
+_audio_callback: Optional[Callable[[bytes], None]] = None
 
 
 def set_log_callback(cb: Callable[[str, str], None]) -> None:
@@ -44,11 +45,22 @@ def set_log_callback(cb: Callable[[str, str], None]) -> None:
     _log_callback = cb
 
 
+def set_audio_callback(cb: Callable[[bytes], None]) -> None:
+    global _audio_callback
+    _audio_callback = cb
+
+
 def _emit(job_id: str, msg: str) -> None:
     """Send a log line to the WebSocket callback."""
     logger.info(f"[{job_id[:8]}] {msg}")
     if _log_callback:
         _log_callback(job_id, msg)
+
+
+def _emit_audio(pcm_bytes: bytes) -> None:
+    """Send binary PCM audio to the WebSocket callback."""
+    if _audio_callback:
+        _audio_callback(pcm_bytes)
 
 
 class JobRunner:
@@ -59,6 +71,8 @@ class JobRunner:
         self._pool = ThreadPoolExecutor(max_workers=1)
         self._live_active = False
         self._live_thread = None
+        self._audio_enabled = False
+        self._demod_mode = "fm"
 
     def submit_scan(self, start_mhz: float, stop_mhz: float,
                     duration: float, gain: float) -> Job:
@@ -251,8 +265,9 @@ class JobRunner:
 
     # ── Live mode ────────────────────────────────────────
 
-    def start_live(self, start_mhz: float, stop_mhz: float, gain: float) -> None:
-        """Start continuous spectrum capture."""
+    def start_live(self, start_mhz: float, stop_mhz: float, gain: float,
+                    audio_enabled: bool = False, demod_mode: str = "fm") -> None:
+        """Start continuous spectrum capture with optional audio demod."""
         if self._live_active:
             self.stop_live()
 
@@ -267,6 +282,11 @@ class JobRunner:
         bw_hz = (stop_mhz - start_mhz) * 1e6
         sample_rate = min(max(bw_hz, 0.25e6), SAMPLE_RATE)
 
+        self._audio_enabled = audio_enabled
+        self._demod_mode = demod_mode
+        logger.info("live start: audio=%s demod=%s sr=%.0f Hz",
+                     audio_enabled, demod_mode, sample_rate)
+
         self._live_active = True
         import threading
         self._live_thread = threading.Thread(
@@ -275,29 +295,91 @@ class JobRunner:
             daemon=True,
         )
         self._live_thread.start()
-        _emit("live", f"Live started: {start_mhz:.1f}–{stop_mhz:.1f} MHz")
+        audio_tag = f" [audio: {demod_mode.upper()}]" if audio_enabled else ""
+        _emit("live", f"Live started: {start_mhz:.1f}–{stop_mhz:.1f} MHz{audio_tag}")
 
     def stop_live(self) -> None:
         """Stop continuous spectrum capture."""
         self._live_active = False
+        self._audio_enabled = False
         if self._live_thread:
             self._live_thread.join(timeout=3)
             self._live_thread = None
+        logger.info("live stopped")
         _emit("live", "Live stopped")
+
+    def toggle_audio(self, enabled: bool, demod_mode: str = "fm") -> None:
+        """Toggle audio demod on/off while live is running."""
+        self._audio_enabled = enabled
+        self._demod_mode = demod_mode
+        state = f"ON ({demod_mode.upper()})" if enabled else "OFF"
+        logger.info("audio toggled: %s", state)
+        _emit("live", f"Audio {state}")
 
     @property
     def live_active(self) -> bool:
         return self._live_active
 
+    @property
+    def audio_enabled(self) -> bool:
+        return self._audio_enabled
+
+    def _process_live_frame(self, capture, sample_rate: float,
+                            frame_count: int) -> None:
+        """Process a single live frame: spectrum + optional audio demod.
+
+        Runs in a worker thread so the next USB capture can overlap.
+        """
+        import json
+        from core.dsp import compute_psd, find_peaks, demodulate, DemodMode
+
+        DOWNSAMPLE_POINTS = 1024
+
+        result = compute_psd(capture, nfft=2048)
+
+        step = max(1, len(result.freqs_mhz) // DOWNSAMPLE_POINTS)
+        freqs = result.freqs_mhz[::step]
+        power = result.power_db[::step]
+
+        peaks = find_peaks(result.freqs_mhz, result.power_db)
+
+        payload = json.dumps({
+            "type": "spectrum",
+            "freqs_mhz": freqs.tolist(),
+            "power_db": power.tolist(),
+            "peaks": [
+                {"freq_mhz": pk.freq_mhz, "power_db": pk.power_db,
+                 "bandwidth_khz": pk.bandwidth_khz}
+                for pk in peaks
+            ],
+        })
+
+        if _log_callback:
+            _log_callback("__spectrum__", payload)
+
+        if self._audio_enabled:
+            try:
+                mode = DemodMode(self._demod_mode)
+                pcm = demodulate(capture.samples, sample_rate, mode)
+                _emit_audio(pcm.tobytes())
+            except Exception as e:
+                logger.warning("audio demod error frame %d: %s", frame_count, e)
+
     def _live_loop(self, center_hz: float, sample_rate: float,
                    gain: float, start_mhz: float, stop_mhz: float) -> None:
-        """Continuous capture loop — runs in a background thread."""
-        import json
+        """Continuous capture loop with pipelined processing.
+
+        Pipeline: process frame N in a worker thread while capturing frame N+1.
+        This overlaps the ~250ms USB capture with ~70ms of processing,
+        so cycle time ≈ max(capture, process) ≈ 250ms instead of their sum.
+        """
+        import threading
         from core.sdr import SDRDevice, CaptureConfig
-        from core.dsp import compute_psd, find_peaks
 
         CAPTURE_DURATION = 0.25
-        DOWNSAMPLE_POINTS = 1024
+
+        logger.info("live loop starting: fc=%.3f MHz sr=%.0f Hz gain=%.0f dB",
+                     center_hz / 1e6, sample_rate, gain)
 
         try:
             config = CaptureConfig(
@@ -307,34 +389,34 @@ class JobRunner:
                 duration=CAPTURE_DURATION,
             )
 
+            frame_count = 0
+            process_thread: threading.Thread | None = None
+
             with SDRDevice() as sdr:
+                logger.info("live loop: SDR device opened (pipelined)")
                 while self._live_active:
                     capture = sdr.capture(config)
-                    result = compute_psd(capture, nfft=2048)
 
-                    step = max(1, len(result.freqs_mhz) // DOWNSAMPLE_POINTS)
-                    freqs = result.freqs_mhz[::step]
-                    power = result.power_db[::step]
+                    if process_thread is not None:
+                        process_thread.join()
 
-                    peaks = find_peaks(result.freqs_mhz, result.power_db)
+                    process_thread = threading.Thread(
+                        target=self._process_live_frame,
+                        args=(capture, sample_rate, frame_count),
+                        daemon=True,
+                    )
+                    process_thread.start()
+                    frame_count += 1
 
-                    payload = json.dumps({
-                        "type": "spectrum",
-                        "freqs_mhz": freqs.tolist(),
-                        "power_db": power.tolist(),
-                        "peaks": [
-                            {"freq_mhz": pk.freq_mhz, "power_db": pk.power_db,
-                             "bandwidth_khz": pk.bandwidth_khz}
-                            for pk in peaks
-                        ],
-                    })
-
-                    if _log_callback:
-                        _log_callback("__spectrum__", payload)
+            # Wait for last processing thread before exiting
+            if process_thread is not None:
+                process_thread.join(timeout=2)
 
         except Exception as e:
             _emit("live", f"Live error: {e}")
             logger.error(traceback.format_exc())
         finally:
             self._live_active = False
+            self._audio_enabled = False
+            logger.info("live loop exited after %d frames", frame_count if 'frame_count' in dir() else 0)
 

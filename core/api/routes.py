@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from core.api import ws
-from core.api.models import ScanRequest, WaterfallRequest, LiveRequest, JobInfo
+from core.api.models import ScanRequest, WaterfallRequest, LiveRequest, AudioToggleRequest, JobInfo
 from core.api.runner import JobRunner
 
 
@@ -29,17 +29,26 @@ def create_routes(runner: JobRunner) -> APIRouter:
 
     @router.post("/api/live/start")
     async def start_live(req: LiveRequest):
-        runner.start_live(req.start_mhz, req.stop_mhz, req.gain)
-        return {"status": "started", "start_mhz": req.start_mhz, "stop_mhz": req.stop_mhz}
+        runner.start_live(req.start_mhz, req.stop_mhz, req.gain,
+                          req.audio_enabled, req.demod_mode)
+        return {"status": "started", "start_mhz": req.start_mhz, "stop_mhz": req.stop_mhz,
+                "audio_enabled": req.audio_enabled, "demod_mode": req.demod_mode}
 
     @router.post("/api/live/stop")
     async def stop_live():
         runner.stop_live()
         return {"status": "stopped"}
 
+    @router.post("/api/live/audio")
+    async def toggle_audio(req: AudioToggleRequest):
+        if not runner.live_active:
+            return JSONResponse({"error": "Live mode is not active"}, status_code=400)
+        runner.toggle_audio(req.enabled, req.demod_mode)
+        return {"audio_enabled": req.enabled, "demod_mode": req.demod_mode}
+
     @router.get("/api/live/status")
     async def live_status():
-        return {"active": runner.live_active}
+        return {"active": runner.live_active, "audio_enabled": runner.audio_enabled}
 
     @router.get("/api/jobs")
     async def list_jobs():

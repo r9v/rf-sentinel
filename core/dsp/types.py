@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 import numpy as np
+
+
+class DemodMode(str, Enum):
+    FM = "fm"
+    AM = "am"
 
 
 @dataclass

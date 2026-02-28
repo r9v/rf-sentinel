@@ -6,8 +6,9 @@ import numpy as np
 from scipy.signal import welch, spectrogram
 
 from core.sdr import CaptureResult
-from core.dsp.types import SpectrumResult, WaterfallResult    # noqa: F401
-from core.dsp.peaks import SignalPeak, find_peaks             # noqa: F401
+from core.dsp.types import SpectrumResult, WaterfallResult, DemodMode  # noqa: F401
+from core.dsp.peaks import SignalPeak, find_peaks                      # noqa: F401
+from core.dsp.demod import demodulate, AUDIO_RATE                      # noqa: F401
 from core.dsp.stitch import (                                 # noqa: F401
     SAMPLE_RATE, USABLE_BW_FRAC, STEP_HZ,
     plan_chunks, trim_spectrum, stitch_spectra,

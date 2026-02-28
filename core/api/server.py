@@ -5,13 +5,19 @@ from __future__ import annotations
 import asyncio
 import logging
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s.%(msecs)03d %(levelname)-5s [%(name)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from core.api import ws
 from core.api.routes import create_routes
-from core.api.runner import JobRunner, set_log_callback, PLOTS_DIR
+from core.api.runner import JobRunner, set_log_callback, set_audio_callback, PLOTS_DIR
 
 logger = logging.getLogger("rfsentinel.server")
 
@@ -41,7 +47,8 @@ app.mount("/api/plots", StaticFiles(directory=str(PLOTS_DIR)), name="plots")
 async def _startup() -> None:
     ws.set_loop(asyncio.get_running_loop())
     set_log_callback(ws.log_callback)
-    logger.info("RFSentinel server started")
+    set_audio_callback(ws.audio_callback)
+    logger.info("RFSentinel server started (audio support enabled)")
 
 
 # ── Entry point ─────────────────────────────────────────

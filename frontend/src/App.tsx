@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWebSocket, LogEntry } from './hooks/useWebSocket';
+import { useAudioPlayer } from './hooks/useAudioPlayer';
 import { getStatus, JobInfo } from './api';
-import ControlPanel from './components/ControlPanel';
+import ControlPanel, { DemodMode } from './components/ControlPanel';
 import LogConsole from './components/LogConsole';
 import JobList from './components/JobList';
 import ResultView from './components/ResultView';
@@ -13,7 +14,9 @@ const statusDot = 'w-2 h-2 rounded-full';
 
 // ── Local components ─────────────────────────────────────
 
-function Header({ liveActive, serverOnline }: { liveActive: boolean; serverOnline: boolean }) {
+function Header({ liveActive, audioEnabled, serverOnline }: {
+  liveActive: boolean; audioEnabled: boolean; serverOnline: boolean;
+}) {
   return (
     <header className="border-b border-gray-800 px-4 py-2.5 flex items-center justify-between">
       <div className="flex items-center gap-3">
@@ -28,6 +31,11 @@ function Header({ liveActive, serverOnline }: { liveActive: boolean; serverOnlin
             ● LIVE
           </span>
         )}
+        {audioEnabled && (
+          <span className="text-xs px-2 py-0.5 rounded bg-green-500/15 text-green-300 font-mono">
+            🔊 AUDIO
+          </span>
+        )}
         <div className="flex items-center gap-1.5">
           <span className={`${statusDot} ${serverOnline ? 'bg-green-400' : 'bg-red-400'}`} />
           <span className="text-xs text-gray-500">
@@ -39,9 +47,12 @@ function Header({ liveActive, serverOnline }: { liveActive: boolean; serverOnlin
   );
 }
 
-function Sidebar({ liveActive, onLiveToggle, selectedJob, onSelectJob }: {
+function Sidebar({ liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, selectedJob, onSelectJob }: {
   liveActive: boolean;
+  audioEnabled: boolean;
   onLiveToggle: (active: boolean) => void;
+  onAudioToggle: (enabled: boolean, demodMode: DemodMode) => void;
+  onVolumeChange: (v: number) => void;
   selectedJob: JobInfo | null;
   onSelectJob: (job: JobInfo | null) => void;
 }) {
@@ -54,6 +65,9 @@ function Sidebar({ liveActive, onLiveToggle, selectedJob, onSelectJob }: {
           onJobStarted={() => setRefreshTrigger(n => n + 1)}
           liveActive={liveActive}
           onLiveToggle={onLiveToggle}
+          audioEnabled={audioEnabled}
+          onAudioToggle={onAudioToggle}
+          onVolumeChange={onVolumeChange}
         />
       </div>
       <div className="flex-1 overflow-y-auto p-3">
@@ -95,11 +109,15 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
 // ── App ──────────────────────────────────────────────────
 
 export default function App() {
-  const { connected, logs, clearLogs, lastMessage } = useWebSocket(WS_URL);
+  const audio = useAudioPlayer();
+  const { connected, logs, clearLogs, lastMessage } = useWebSocket(WS_URL, {
+    onAudioData: audio.feedAudio,
+  });
   const [serverOnline, setServerOnline] = useState(false);
   const [selectedJob, setSelectedJob] = useState<JobInfo | null>(null);
   const [liveActive, setLiveActive] = useState(false);
   const [liveFrame, setLiveFrame] = useState<SpectrumFrame | null>(null);
+  const [audioEnabled, setAudioEnabled] = useState(false);
 
   useEffect(() => {
     const check = async () => {
@@ -127,16 +145,34 @@ export default function App() {
 
   const handleLiveToggle = useCallback((active: boolean) => {
     setLiveActive(active);
-    if (!active) setLiveFrame(null);
-  }, []);
+    if (!active) {
+      setLiveFrame(null);
+      setAudioEnabled(false);
+      audio.stop();
+      console.log('[App] live stopped, audio stopped');
+    }
+  }, [audio]);
+
+  const handleAudioToggle = useCallback((enabled: boolean, _demodMode: DemodMode) => {
+    console.log('[App] audio toggle:', enabled, _demodMode);
+    setAudioEnabled(enabled);
+    if (enabled) {
+      audio.start();
+    } else {
+      audio.stop();
+    }
+  }, [audio]);
 
   return (
     <div className="min-h-screen bg-[#0a0e1a] text-gray-100">
-      <Header liveActive={liveActive} serverOnline={serverOnline} />
+      <Header liveActive={liveActive} audioEnabled={audioEnabled} serverOnline={serverOnline} />
       <div className="flex h-[calc(100vh-45px)]">
         <Sidebar
           liveActive={liveActive}
+          audioEnabled={audioEnabled}
           onLiveToggle={handleLiveToggle}
+          onAudioToggle={handleAudioToggle}
+          onVolumeChange={audio.setVolume}
           selectedJob={selectedJob}
           onSelectJob={setSelectedJob}
         />
