@@ -14,6 +14,7 @@ logger = logging.getLogger("rfsentinel.ws")
 router = APIRouter()
 
 _ws_clients: list[WebSocket] = []
+_audio_ws_clients: list[WebSocket] = []
 _loop: Optional[asyncio.AbstractEventLoop] = None
 
 
@@ -39,15 +40,15 @@ async def _broadcast(payload: str) -> None:
 
 
 async def _broadcast_bytes(data: bytes) -> None:
-    """Send binary data to all connected WebSocket clients."""
+    """Send binary audio data to dedicated audio WebSocket clients."""
     dead = []
-    for ws in _ws_clients:
+    for ws in _audio_ws_clients:
         try:
             await ws.send_bytes(data)
         except Exception:
             dead.append(ws)
     for ws in dead:
-        _ws_clients.remove(ws)
+        _audio_ws_clients.remove(ws)
     if dead:
         logger.debug("audio broadcast: dropped %d dead clients", len(dead))
 
@@ -67,7 +68,7 @@ def audio_callback(data: bytes) -> None:
     """Thread-safe callback to send binary audio PCM via WebSocket."""
     if not (_loop and _loop.is_running()):
         return
-    if not _ws_clients:
+    if not _audio_ws_clients:
         return
     asyncio.run_coroutine_threadsafe(_broadcast_bytes(data), _loop)
 
@@ -85,3 +86,18 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         _ws_clients.remove(ws)
         logger.info(f"WebSocket disconnected ({len(_ws_clients)} clients)")
+
+
+@router.websocket("/api/ws/audio")
+async def audio_websocket_endpoint(ws: WebSocket) -> None:
+    await ws.accept()
+    _audio_ws_clients.append(ws)
+    logger.info(f"Audio WS connected ({len(_audio_ws_clients)} audio clients)")
+    try:
+        while True:
+            data = await ws.receive_text()
+            if data == "ping":
+                await ws.send_text("pong")
+    except WebSocketDisconnect:
+        _audio_ws_clients.remove(ws)
+        logger.info(f"Audio WS disconnected ({len(_audio_ws_clients)} audio clients)")

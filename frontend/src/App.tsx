@@ -9,6 +9,7 @@ import ResultView from './components/ResultView';
 import LiveSpectrum, { SpectrumFrame } from './components/LiveSpectrum';
 
 const WS_URL = `ws://${window.location.hostname}:8900/api/ws`;
+const AUDIO_WS_URL = `ws://${window.location.hostname}:8900/api/ws/audio`;
 
 const statusDot = 'w-2 h-2 rounded-full';
 
@@ -109,10 +110,8 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
 // ── App ──────────────────────────────────────────────────
 
 export default function App() {
-  const audio = useAudioPlayer();
-  const { connected, logs, clearLogs, lastMessage } = useWebSocket(WS_URL, {
-    onAudioData: audio.feedAudio,
-  });
+  const audio = useAudioPlayer(AUDIO_WS_URL);
+  const { connected, logs, clearLogs, lastMessage } = useWebSocket(WS_URL);
   const [serverOnline, setServerOnline] = useState(false);
   const [selectedJob, setSelectedJob] = useState<JobInfo | null>(null);
   const [liveActive, setLiveActive] = useState(false);

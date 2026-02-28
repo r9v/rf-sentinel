@@ -125,7 +125,7 @@ export default function ControlPanel({ onJobStarted, liveActive, onLiveToggle, a
   const [mode, setMode] = useState<Mode>('scan');
   const [startMhz, setStartMhz] = useState(97.0);
   const [stopMhz, setStopMhz] = useState(99.0);
-  const [centerMhz, setCenterMhz] = useState(98.0);
+  const [centerMhz, setCenterMhz] = useState(104.2);
   const [duration, setDuration] = useState(2.0);
   const [gain, setGain] = useState(30.0);
   const [loading, setLoading] = useState(false);

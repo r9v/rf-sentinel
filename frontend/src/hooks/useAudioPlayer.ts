@@ -1,44 +1,96 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 
-// AudioWorklet processor — runs in audio thread, reads from ring buffer
+// ── Tunable constants ────────────────────────────────────────────────
+// RATE_P: lower = smoother pitch, higher = faster correction
+// TARGET_SAMPLES: higher = more latency but more jitter cushion
+// MAX/MIN_RATE: widen if drift exceeds current bounds
+const SAMPLE_RATE = 48000;
+const RING_BUFFER_SECS = 2;                 // max ring buffer length (seconds)
+const PREFILL_SAMPLES = 24000;              // 500ms — buffer before playback starts
+const TARGET_SAMPLES = 24000;               // 500ms — buffer level we steer toward
+const MAX_RATE = 1.05;                      // max playback rate (5% faster)
+const MIN_RATE = 0.95;                      // min playback rate (5% slower)
+const RATE_P = 0.1 / TARGET_SAMPLES;        // proportional gain — lower = smoother
+const RATE_SMOOTH = 0.002;                  // EMA alpha for rate — lower = more stable pitch
+const STATUS_INTERVAL = 750;                // worklet status every N render calls (~2s)
+
+// ── AudioWorklet processor code ──────────────────────────────────────
+// Accepts audio data via MessagePort (from Worker) or via main port fallback.
+// Int16→Float32 conversion happens here on the audio thread.
 const WORKLET_CODE = `
 class PCMProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this._ring = new Float32Array(48000 * 2); // 2s max buffer
+    this._ring = new Float32Array(${SAMPLE_RATE * RING_BUFFER_SECS});
     this._writePos = 0;
     this._readPos = 0;
-    this._count = 0;       // samples available
+    this._readFrac = 0;
+    this._count = 0;
     this._underruns = 0;
+    this._started = false;
+    this._smoothRate = 1.0;
 
-    this.port.onmessage = (e) => {
-      const samples = e.data;
+    this._handleAudio = (buf) => {
+      const int16 = buf instanceof ArrayBuffer ? new Int16Array(buf) : null;
       const ring = this._ring;
       const len = ring.length;
-
-      for (let i = 0; i < samples.length; i++) {
-        ring[this._writePos] = samples[i];
+      const n = int16 ? int16.length : 0;
+      for (let i = 0; i < n; i++) {
+        ring[this._writePos] = int16[i] / 32768;
         this._writePos = (this._writePos + 1) % len;
       }
-      this._count = Math.min(this._count + samples.length, len);
+      this._count = Math.min(this._count + n, len);
+    };
+
+    this.port.onmessage = (e) => {
+      if (e.data && e.data.type === 'audio-port') {
+        // Dedicated audio port from Worker via MessageChannel
+        const audioPort = e.data.port;
+        audioPort.onmessage = (ev) => this._handleAudio(ev.data);
+      } else {
+        this._handleAudio(e.data);
+      }
     };
   }
 
   process(inputs, outputs) {
-    const out = outputs[0][0]; // mono, 128 samples
+    const out = outputs[0][0];
     if (!out) return true;
+
+    if (!this._started) {
+      out.fill(0);
+      if (this._count >= ${PREFILL_SAMPLES}) this._started = true;
+      return true;
+    }
+
     const needed = out.length;
     const ring = this._ring;
     const len = ring.length;
 
-    if (this._count >= needed) {
+    const error = this._count - ${TARGET_SAMPLES};
+    const instant = 1.0 + error * ${RATE_P};
+    this._smoothRate += ${RATE_SMOOTH} * (instant - this._smoothRate);
+    const rate = Math.min(${MAX_RATE}, Math.max(${MIN_RATE}, this._smoothRate));
+
+    const inputNeeded = Math.ceil(needed * rate) + 1;
+
+    if (this._count >= inputNeeded) {
+      let frac = this._readFrac;
+      let pos = this._readPos;
       for (let i = 0; i < needed; i++) {
-        out[i] = ring[this._readPos];
-        this._readPos = (this._readPos + 1) % len;
+        const idx0 = pos % len;
+        const idx1 = (pos + 1) % len;
+        out[i] = ring[idx0] + frac * (ring[idx1] - ring[idx0]);
+        frac += rate;
+        const whole = frac | 0;
+        pos += whole;
+        frac -= whole;
       }
-      this._count -= needed;
+      const consumed = pos - this._readPos;
+      this._readPos = pos % len;
+      this._readFrac = frac;
+      this._count -= consumed;
     } else {
-      // Underrun — output silence
       out.fill(0);
       this._underruns++;
       if (this._underruns % 100 === 1) {
@@ -46,9 +98,8 @@ class PCMProcessor extends AudioWorkletProcessor {
       }
     }
 
-    // Periodic status report
-    if (currentFrame % 12000 === 0) {
-      this.port.postMessage({ type: 'status', buffered: this._count, underruns: this._underruns });
+    if (currentFrame % ${STATUS_INTERVAL} === 0) {
+      this.port.postMessage({ type: 'status', buffered: this._count, underruns: this._underruns, rate: rate.toFixed(4) });
     }
 
     return true;
@@ -57,10 +108,57 @@ class PCMProcessor extends AudioWorkletProcessor {
 registerProcessor('pcm-processor', PCMProcessor);
 `;
 
+// ── Web Worker code ──────────────────────────────────────────────────
+// Runs off main thread. Owns a dedicated WebSocket for audio binary
+// frames and forwards them to the AudioWorklet via MessagePort.
+const WORKER_CODE = `
+let ws = null;
+let audioPort = null;
+let wsUrl = null;
+let reconnectTimer = null;
+
+function connect() {
+  if (!wsUrl) return;
+  if (ws) { ws.onclose = null; ws.close(); ws = null; }
+
+  ws = new WebSocket(wsUrl);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => postMessage({ type: 'ws-open' });
+
+  ws.onmessage = (e) => {
+    if (e.data instanceof ArrayBuffer && audioPort) {
+      audioPort.postMessage(e.data, [e.data]);
+    }
+  };
+
+  ws.onclose = () => {
+    postMessage({ type: 'ws-close' });
+    ws = null;
+    reconnectTimer = setTimeout(connect, 3000);
+  };
+
+  ws.onerror = () => { if (ws) ws.close(); };
+}
+
+onmessage = (e) => {
+  const msg = e.data;
+  if (msg.type === 'init') {
+    wsUrl = msg.url;
+    audioPort = msg.port;
+    connect();
+  } else if (msg.type === 'stop') {
+    clearTimeout(reconnectTimer);
+    if (ws) { ws.onclose = null; ws.close(); ws = null; }
+    audioPort = null;
+    close();
+  }
+};
+`;
+
 type AudioState = 'stopped' | 'starting' | 'running' | 'error';
 
 interface UseAudioPlayerReturn {
-  feedAudio: (data: ArrayBuffer) => void;
   start: () => Promise<void>;
   stop: () => void;
   setVolume: (v: number) => void;
@@ -77,23 +175,15 @@ function logWarn(...args: unknown[]) {
   console.warn(LOG_PREFIX, ...args);
 }
 
-function int16ToFloat32(buffer: ArrayBuffer): Float32Array {
-  const int16 = new Int16Array(buffer);
-  const float32 = new Float32Array(int16.length);
-  for (let i = 0; i < int16.length; i++) {
-    float32[i] = int16[i] / 32768;
-  }
-  return float32;
-}
 
-export function useAudioPlayer(): UseAudioPlayerReturn {
+export function useAudioPlayer(audioWsUrl?: string): UseAudioPlayerReturn {
   const ctxRef = useRef<AudioContext | null>(null);
   const workletRef = useRef<AudioWorkletNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
+  const workerRef = useRef<Worker | null>(null);
   const stateRef = useRef<AudioState>('stopped');
   const [stateForRender, setStateForRender] = useState<AudioState>('stopped');
 
-  // Clean up on unmount
   useEffect(() => {
     return () => {
       log('unmounting, cleaning up');
@@ -102,6 +192,11 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   }, []);
 
   function stopInternal() {
+    if (workerRef.current) {
+      workerRef.current.postMessage({ type: 'stop' });
+      workerRef.current.terminate();
+      workerRef.current = null;
+    }
     if (workletRef.current) {
       workletRef.current.disconnect();
       workletRef.current = null;
@@ -129,30 +224,28 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     log('initializing AudioContext @ 48kHz');
 
     try {
-      const ctx = new AudioContext({ sampleRate: 48000 });
+      const ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
       ctxRef.current = ctx;
 
       // Load worklet from blob URL
-      const blob = new Blob([WORKLET_CODE], { type: 'application/javascript' });
-      const url = URL.createObjectURL(blob);
+      const workletBlob = new Blob([WORKLET_CODE], { type: 'application/javascript' });
+      const workletUrl = URL.createObjectURL(workletBlob);
       log('loading worklet module');
-      await ctx.audioWorklet.addModule(url);
-      URL.revokeObjectURL(url);
+      await ctx.audioWorklet.addModule(workletUrl);
+      URL.revokeObjectURL(workletUrl);
 
-      // Create worklet node (mono output)
       const worklet = new AudioWorkletNode(ctx, 'pcm-processor', {
         outputChannelCount: [1],
       });
       workletRef.current = worklet;
 
-      // Listen for status messages from worklet
       worklet.port.onmessage = (e) => {
         const msg = e.data;
         if (msg.type === 'underrun') {
           logWarn(`buffer underrun #${msg.count} (buffered: ${msg.buffered})`);
         } else if (msg.type === 'status') {
-          const ms = ((msg.buffered / 48000) * 1000).toFixed(0);
-          log(`worklet status: ${ms}ms buffered, ${msg.underruns} underruns`);
+          const ms = ((msg.buffered / SAMPLE_RATE) * 1000).toFixed(0);
+          log(`worklet: ${ms}ms buf, ${msg.underruns} underruns, rate=${msg.rate ?? '?'}`);
         }
       };
 
@@ -161,14 +254,33 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
       gain.gain.value = 0.5;
       gainRef.current = gain;
 
-      // Connect: worklet → gain → speakers
       worklet.connect(gain);
       gain.connect(ctx.destination);
 
-      // Resume context (required after user gesture)
       if (ctx.state === 'suspended') {
         log('resuming suspended AudioContext');
         await ctx.resume();
+      }
+
+      // Set up Worker + MessageChannel for off-main-thread audio delivery
+      if (audioWsUrl) {
+        const channel = new MessageChannel();
+        // port1 → worklet (receives audio), port2 → worker (sends audio)
+        worklet.port.postMessage({ type: 'audio-port', port: channel.port1 }, [channel.port1]);
+
+        const workerBlob = new Blob([WORKER_CODE], { type: 'application/javascript' });
+        const workerUrl = URL.createObjectURL(workerBlob);
+        const worker = new Worker(workerUrl);
+        URL.revokeObjectURL(workerUrl);
+        workerRef.current = worker;
+
+        worker.onmessage = (e) => {
+          if (e.data.type === 'ws-open') log('audio WS connected');
+          else if (e.data.type === 'ws-close') logWarn('audio WS disconnected');
+        };
+
+        worker.postMessage({ type: 'init', url: audioWsUrl, port: channel.port2 }, [channel.port2]);
+        log('audio Worker started');
       }
 
       stateRef.current = 'running';
@@ -180,17 +292,11 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
       setStateForRender('error');
       stopInternal();
     }
-  }, []);
+  }, [audioWsUrl]);
 
   const stop = useCallback(() => {
     log('stopping');
     stopInternal();
-  }, []);
-
-  const feedAudio = useCallback((data: ArrayBuffer) => {
-    if (!workletRef.current || stateRef.current !== 'running') return;
-    const float32 = int16ToFloat32(data);
-    workletRef.current.port.postMessage(float32, [float32.buffer]);
   }, []);
 
   const setVolume = useCallback((v: number) => {
@@ -202,7 +308,6 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   }, []);
 
   return {
-    feedAudio,
     start,
     stop,
     setVolume,

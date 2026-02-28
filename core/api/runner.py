@@ -75,6 +75,7 @@ class JobRunner:
         self._live_thread = None
         self._audio_enabled = False
         self._demod_mode = DemodMode.FM
+        self._demod_state = None
 
     def _submit_job(self, job_type: str, params: dict, run_fn: Callable) -> Job:
         if self._live_active:
@@ -254,6 +255,7 @@ class JobRunner:
 
         self._audio_enabled = audio_enabled
         self._demod_mode = demod_mode
+        self._demod_state = None
         logger.info("live start: audio=%s demod=%s sr=%.0f Hz",
                      audio_enabled, demod_mode, sample_rate)
 
@@ -281,6 +283,7 @@ class JobRunner:
         """Toggle audio demod on/off while live is running."""
         self._audio_enabled = enabled
         self._demod_mode = demod_mode
+        self._demod_state = None
         state = f"ON ({demod_mode.upper()})" if enabled else "OFF"
         logger.info("audio toggled: %s", state)
         _emit("live", f"Audio {state}")
@@ -294,16 +297,34 @@ class JobRunner:
         return self._audio_enabled
 
     def _process_live_frame(self, capture, sample_rate: float,
-                            frame_count: int) -> None:
-        """Process a single live frame: spectrum + optional audio demod.
+                            frame_count: int, send_spectrum: bool) -> None:
+        """Process a single live frame.
 
-        Runs in a worker thread so the next USB capture can overlap.
+        Audio demod runs every frame (time-sensitive for smooth playback).
+        Spectrum (PSD + peaks + JSON) only runs when send_spectrum is True
+        to avoid wasting CPU and WS bandwidth on every small frame.
         """
+        from core.dsp import demodulate
+
+        if self._audio_enabled:
+            try:
+                mode = DemodMode(self._demod_mode)
+                pcm, self._demod_state = demodulate(
+                    capture.samples, sample_rate, mode, self._demod_state,
+                )
+                _emit_audio(pcm.tobytes())
+            except Exception as e:
+                logger.warning("audio demod error frame %d: %s", frame_count, e)
+
+        if send_spectrum:
+            self._send_spectrum(capture)
+
+    def _send_spectrum(self, capture) -> None:
+        """Compute and send spectrum data over WebSocket."""
         import json
-        from core.dsp import compute_psd, find_peaks, demodulate
+        from core.dsp import compute_psd, find_peaks
 
         DOWNSAMPLE_POINTS = 1024
-
         result = compute_psd(capture, nfft=2048)
 
         step = max(1, len(result.freqs_mhz) // DOWNSAMPLE_POINTS)
@@ -326,28 +347,23 @@ class JobRunner:
         if _log_callback:
             _log_callback("__spectrum__", payload)
 
-        if self._audio_enabled:
-            try:
-                mode = DemodMode(self._demod_mode)
-                pcm = demodulate(capture.samples, sample_rate, mode)
-                _emit_audio(pcm.tobytes())
-            except Exception as e:
-                logger.warning("audio demod error frame %d: %s", frame_count, e)
-
     def _live_loop(self, center_hz: float, sample_rate: float,
                    gain: float, start_mhz: float, stop_mhz: float) -> None:
         """Continuous capture loop with pipelined processing.
 
+        Small capture chunks (50ms) for smooth audio delivery.
+        Spectrum is only computed every SPECTRUM_EVERY frames (~250ms)
+        to keep CPU and WS overhead low.
+
         Pipeline: process frame N in a worker thread while capturing frame N+1.
-        This overlaps the ~250ms USB capture with ~70ms of processing,
-        so cycle time ≈ max(capture, process) ≈ 250ms instead of their sum.
         """
         from core.sdr import SDRDevice, CaptureConfig
 
-        CAPTURE_DURATION = 0.25
+        CAPTURE_DURATION = 0.1    # 100ms — balance between smooth audio and USB overhead
+        SPECTRUM_EVERY = 5        # send spectrum every 5th frame (~500ms)
 
-        logger.info("live loop starting: fc=%.3f MHz sr=%.0f Hz gain=%.0f dB",
-                     center_hz / 1e6, sample_rate, gain)
+        logger.info("live loop starting: fc=%.3f MHz sr=%.0f Hz gain=%.0f dB chunk=%.0fms",
+                     center_hz / 1e6, sample_rate, gain, CAPTURE_DURATION * 1000)
 
         frame_count = 0
         try:
@@ -368,9 +384,10 @@ class JobRunner:
                     if process_thread is not None:
                         process_thread.join()
 
+                    send_spectrum = (frame_count % SPECTRUM_EVERY == 0)
                     process_thread = threading.Thread(
                         target=self._process_live_frame,
-                        args=(capture, sample_rate, frame_count),
+                        args=(capture, sample_rate, frame_count, send_spectrum),
                         daemon=True,
                     )
                     process_thread.start()

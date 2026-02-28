@@ -6,24 +6,17 @@ export interface LogEntry {
   timestamp: number;
 }
 
-interface UseWebSocketOptions {
-  onAudioData?: (data: ArrayBuffer) => void;
-}
-
-export function useWebSocket(url: string, options?: UseWebSocketOptions) {
+export function useWebSocket(url: string) {
   const [connected, setConnected] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [lastMessage, setLastMessage] = useState<any>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<number>();
   const disposed = useRef(false);
-  const onAudioRef = useRef(options?.onAudioData);
-  onAudioRef.current = options?.onAudioData;
 
   const connect = useCallback(() => {
     if (disposed.current) return;
 
-    // Close any existing connection first
     if (wsRef.current) {
       wsRef.current.onclose = null;
       wsRef.current.close();
@@ -31,7 +24,6 @@ export function useWebSocket(url: string, options?: UseWebSocketOptions) {
     }
 
     const ws = new WebSocket(url);
-    ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
       if (disposed.current) { ws.close(); return; }
@@ -40,15 +32,7 @@ export function useWebSocket(url: string, options?: UseWebSocketOptions) {
     };
 
     ws.onmessage = (e) => {
-      // Binary frame = audio PCM data
-      if (e.data instanceof ArrayBuffer) {
-        if (onAudioRef.current) {
-          onAudioRef.current(e.data);
-        }
-        return;
-      }
-
-      // Text frame = JSON (spectrum, log, pong)
+      if (typeof e.data !== 'string') return;
       try {
         const data = JSON.parse(e.data);
         if (data.type === 'log') {
