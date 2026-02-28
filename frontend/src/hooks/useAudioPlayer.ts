@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 
 // AudioWorklet processor — runs in audio thread, reads from ring buffer
 const WORKLET_CODE = `
@@ -91,10 +91,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   const workletRef = useRef<AudioWorkletNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
   const stateRef = useRef<AudioState>('stopped');
-  // Force re-render on state change isn't needed — callers read state via ref
-  // But we expose it for UI. Use a simple pattern:
-  const forceUpdate = useRef<() => void>(() => {});
-  const stateForRender = useRef<AudioState>('stopped');
+  const [stateForRender, setStateForRender] = useState<AudioState>('stopped');
 
   // Clean up on unmount
   useEffect(() => {
@@ -118,7 +115,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
       ctxRef.current = null;
     }
     stateRef.current = 'stopped';
-    stateForRender.current = 'stopped';
+    setStateForRender('stopped');
   }
 
   const start = useCallback(async () => {
@@ -128,7 +125,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     }
 
     stateRef.current = 'starting';
-    stateForRender.current = 'starting';
+    setStateForRender('starting');
     log('initializing AudioContext @ 48kHz');
 
     try {
@@ -175,12 +172,12 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
       }
 
       stateRef.current = 'running';
-      stateForRender.current = 'running';
+      setStateForRender('running');
       log(`started: sampleRate=${ctx.sampleRate} state=${ctx.state}`);
     } catch (err) {
       console.error(LOG_PREFIX, 'failed to start:', err);
       stateRef.current = 'error';
-      stateForRender.current = 'error';
+      setStateForRender('error');
       stopInternal();
     }
   }, []);
@@ -209,6 +206,6 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     start,
     stop,
     setVolume,
-    state: stateForRender.current,
+    state: stateForRender,
   };
 }

@@ -4,7 +4,6 @@ Coding preferences for this project.
 
 ## General
 
-- Make the minimum change needed. Don't refactor surrounding code unless asked.
 - Delete dead code rather than leaving it around (e.g. obsolete CLI modules, unused functions).
 - Don't add comments unless the logic is genuinely non-obvious.
 
@@ -23,8 +22,8 @@ Coding preferences for this project.
 - Unify near-identical abstractions (e.g. two broadcast functions that do the same thing → one).
 - For long or conditional `className` strings, extract them as named constants at the top of the same file rather than using CSS files or extra libraries:
   ```tsx
-  const card = 'px-3 py-2 rounded-lg border border-gray-700/50 bg-gray-800/30';
-  const cardSelected = 'border-cyan-500/40 bg-cyan-500/5';
+  const card = "px-3 py-2 rounded-lg border border-gray-700/50 bg-gray-800/30";
+  const cardSelected = "border-cyan-500/40 bg-cyan-500/5";
   ```
 
 ## Python
@@ -35,4 +34,3 @@ Coding preferences for this project.
 
 - Never commit or push without explicit user confirmation.
 - Commit messages: one short line, no bullet points, no details.
-- Stage only the files relevant to the change.

@@ -11,7 +11,7 @@ interface Props {
   liveActive: boolean;
   onLiveToggle: (active: boolean) => void;
   audioEnabled: boolean;
-  onAudioToggle: (enabled: boolean, demodMode: DemodMode) => void;
+  onAudioToggle: (enabled: boolean) => void;
   onVolumeChange: (v: number) => void;
 }
 
@@ -45,7 +45,7 @@ function ScanInfo({ bandwidth, numChunks, duration }: { bandwidth: number; numCh
 function AudioControls({ liveActive, audioEnabled, onToggle, volume, onVolumeChange }: {
   liveActive: boolean;
   audioEnabled: boolean;
-  onToggle: (enabled: boolean, mode: DemodMode) => void;
+  onToggle: (enabled: boolean) => void;
   volume: number;
   onVolumeChange: (v: number) => void;
 }) {
@@ -53,10 +53,9 @@ function AudioControls({ liveActive, audioEnabled, onToggle, volume, onVolumeCha
 
   const handleToggle = async () => {
     const next = !audioEnabled;
-    console.log('[ControlPanel] audio toggle:', next, demodMode);
     try {
       await toggleAudio({ enabled: next, demod_mode: demodMode });
-      onToggle(next, demodMode);
+      onToggle(next);
     } catch (e) {
       console.error('[ControlPanel] audio toggle failed:', e);
     }
@@ -65,10 +64,9 @@ function AudioControls({ liveActive, audioEnabled, onToggle, volume, onVolumeCha
   const handleModeChange = async (mode: DemodMode) => {
     setDemodMode(mode);
     if (audioEnabled) {
-      console.log('[ControlPanel] switching demod mode to', mode);
       try {
         await toggleAudio({ enabled: true, demod_mode: mode });
-        onToggle(true, mode);
+        onToggle(true);
       } catch (e) {
         console.error('[ControlPanel] demod mode switch failed:', e);
       }
@@ -154,7 +152,7 @@ export default function ControlPanel({ onJobStarted, liveActive, onLiveToggle, a
       if (liveActive) {
         await stopLive();
         onLiveToggle(false);
-        onAudioToggle(false, 'fm');
+        onAudioToggle(false);
       } else {
         setLoading(true);
         try {
@@ -198,7 +196,7 @@ export default function ControlPanel({ onJobStarted, liveActive, onLiveToggle, a
     if (liveActive && newMode !== 'live') {
       await stopLive();
       onLiveToggle(false);
-      onAudioToggle(false, 'fm');
+      onAudioToggle(false);
     }
     setMode(newMode);
   }, [liveActive, onLiveToggle, onAudioToggle]);

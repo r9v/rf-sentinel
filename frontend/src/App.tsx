@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useWebSocket, LogEntry } from './hooks/useWebSocket';
 import { useAudioPlayer } from './hooks/useAudioPlayer';
 import { getStatus, JobInfo } from './api';
-import ControlPanel, { DemodMode } from './components/ControlPanel';
+import ControlPanel from './components/ControlPanel';
 import LogConsole from './components/LogConsole';
 import JobList from './components/JobList';
 import ResultView from './components/ResultView';
@@ -51,7 +51,7 @@ function Sidebar({ liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolu
   liveActive: boolean;
   audioEnabled: boolean;
   onLiveToggle: (active: boolean) => void;
-  onAudioToggle: (enabled: boolean, demodMode: DemodMode) => void;
+  onAudioToggle: (enabled: boolean) => void;
   onVolumeChange: (v: number) => void;
   selectedJob: JobInfo | null;
   onSelectJob: (job: JobInfo | null) => void;
@@ -149,12 +149,10 @@ export default function App() {
       setLiveFrame(null);
       setAudioEnabled(false);
       audio.stop();
-      console.log('[App] live stopped, audio stopped');
     }
   }, [audio]);
 
-  const handleAudioToggle = useCallback((enabled: boolean, _demodMode: DemodMode) => {
-    console.log('[App] audio toggle:', enabled, _demodMode);
+  const handleAudioToggle = useCallback((enabled: boolean) => {
     setAudioEnabled(enabled);
     if (enabled) {
       audio.start();

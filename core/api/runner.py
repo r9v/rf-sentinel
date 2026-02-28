@@ -6,6 +6,7 @@ import gc
 import time
 import uuid
 import logging
+import threading
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,7 @@ from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 
 from core.api.models import JobStatus
+from core.dsp.types import DemodMode
 from core.plotting import render_scan_plot, render_waterfall_plot
 
 logger = logging.getLogger("rfsentinel.runner")
@@ -72,45 +74,92 @@ class JobRunner:
         self._live_active = False
         self._live_thread = None
         self._audio_enabled = False
-        self._demod_mode = "fm"
+        self._demod_mode = DemodMode.FM
+
+    def _submit_job(self, job_type: str, params: dict, run_fn: Callable) -> Job:
+        if self._live_active:
+            self.stop_live()
+        job_id = uuid.uuid4().hex[:12]
+        job = Job(id=job_id, type=job_type, status=JobStatus.PENDING, params=params)
+        self.jobs[job_id] = job
+        self._pool.submit(run_fn, job)
+        return job
 
     def submit_scan(self, start_mhz: float, stop_mhz: float,
                     duration: float, gain: float) -> Job:
-        if self._live_active:
-            self.stop_live()
-        job_id = uuid.uuid4().hex[:12]
-        job = Job(
-            id=job_id,
-            type="scan",
-            status=JobStatus.PENDING,
-            params={"start_mhz": start_mhz, "stop_mhz": stop_mhz,
-                    "duration": duration, "gain": gain},
-        )
-        self.jobs[job_id] = job
-        self._pool.submit(self._run_scan, job)
-        return job
+        return self._submit_job("scan", {
+            "start_mhz": start_mhz, "stop_mhz": stop_mhz,
+            "duration": duration, "gain": gain,
+        }, self._run_scan)
 
     def submit_waterfall(self, start_mhz: float, stop_mhz: float,
                          duration: float, gain: float) -> Job:
-        if self._live_active:
-            self.stop_live()
-        job_id = uuid.uuid4().hex[:12]
-        job = Job(
-            id=job_id,
-            type="waterfall",
-            status=JobStatus.PENDING,
-            params={"start_mhz": start_mhz, "stop_mhz": stop_mhz,
-                    "duration": duration, "gain": gain},
-        )
-        self.jobs[job_id] = job
-        self._pool.submit(self._run_waterfall, job)
-        return job
+        return self._submit_job("waterfall", {
+            "start_mhz": start_mhz, "stop_mhz": stop_mhz,
+            "duration": duration, "gain": gain,
+        }, self._run_waterfall)
 
     def get_job(self, job_id: str) -> Optional[Job]:
         return self.jobs.get(job_id)
 
     def list_jobs(self, limit: int = 20) -> list[Job]:
         return sorted(self.jobs.values(), key=lambda j: j.created_at, reverse=True)[:limit]
+
+    # ── Shared helpers ──────────────────────────────────
+
+    def _capture_segments(self, job: Job, label: str, compute_fn, trim_fn):
+        """Capture I/Q across planned chunks, returning processed segments."""
+        from core.dsp import plan_chunks, SAMPLE_RATE
+        from core.sdr import SDRDevice, CaptureConfig
+
+        p = job.params
+        centers = plan_chunks(p["start_mhz"] * 1e6, p["stop_mhz"] * 1e6)
+        num_chunks = len(centers)
+
+        _emit(job.id, f"{label}: {p['start_mhz']:.1f} – {p['stop_mhz']:.1f} MHz "
+              f"({num_chunks} chunk{'s' if num_chunks > 1 else ''})")
+
+        segments = []
+        for i, fc in enumerate(centers):
+            _emit(job.id, f"  [{i+1}/{num_chunks}] Capturing {fc/1e6:.1f} MHz...")
+            config = CaptureConfig(
+                center_freq=fc, sample_rate=SAMPLE_RATE,
+                duration=p["duration"], gain=p["gain"],
+            )
+            with SDRDevice() as sdr:
+                capture = sdr.capture(config)
+            data = compute_fn(capture)
+            if num_chunks > 1:
+                data = trim_fn(data)
+            segments.append(data)
+
+        return segments, num_chunks
+
+    @staticmethod
+    def _log_peaks(job_id: str, peaks) -> None:
+        """Emit peak detection results to the log stream."""
+        if peaks:
+            _emit(job_id, f"  Found {len(peaks)} signal{'s' if len(peaks) != 1 else ''}")
+            for pk in peaks[:10]:
+                _emit(job_id, f"    {pk.freq_mhz:.3f} MHz  {pk.power_db:+.1f} dB  (BW ~{pk.bandwidth_khz:.0f} kHz)")
+            if len(peaks) > 10:
+                _emit(job_id, f"    ... and {len(peaks) - 10} more")
+        else:
+            _emit(job_id, "  No signals above noise floor")
+
+    @staticmethod
+    def _serialize_peaks(peaks) -> list[dict]:
+        return [
+            {"freq_mhz": pk.freq_mhz, "power_db": pk.power_db,
+             "prominence_db": pk.prominence_db, "bandwidth_khz": pk.bandwidth_khz}
+            for pk in peaks
+        ]
+
+    def _finalize_job(self, job: Job, t0: float, plot_path: Path, peaks) -> None:
+        job.result_path = plot_path
+        job.status = JobStatus.COMPLETE
+        job.duration_s = round(time.time() - t0, 2)
+        job.params["peaks"] = self._serialize_peaks(peaks)
 
     # ── Scan (stitched) ─────────────────────────────────
 
@@ -120,60 +169,22 @@ class JobRunner:
         p = job.params
 
         try:
-            from core.dsp import plan_chunks, compute_psd, trim_spectrum, stitch_spectra, SAMPLE_RATE
-            from core.sdr import SDRDevice, CaptureConfig
+            from core.dsp import compute_psd, trim_spectrum, stitch_spectra, find_peaks
 
-            start_hz = p["start_mhz"] * 1e6
-            stop_hz = p["stop_mhz"] * 1e6
-            centers = plan_chunks(start_hz, stop_hz)
-            num_chunks = len(centers)
-
-            _emit(job.id, f"Scan: {p['start_mhz']:.1f} – {p['stop_mhz']:.1f} MHz ({num_chunks} chunk{'s' if num_chunks > 1 else ''})")
-
-            segments = []
-            for i, fc in enumerate(centers):
-                fc_mhz = fc / 1e6
-                _emit(job.id, f"  [{i+1}/{num_chunks}] Capturing {fc_mhz:.1f} MHz...")
-
-                config = CaptureConfig(
-                    center_freq=fc, sample_rate=SAMPLE_RATE,
-                    duration=p["duration"], gain=p["gain"],
-                )
-                with SDRDevice() as sdr:
-                    capture = sdr.capture(config)
-                data = compute_psd(capture)
-
-                if num_chunks > 1:
-                    data = trim_spectrum(data)
-                segments.append(data)
+            segments, num_chunks = self._capture_segments(job, "Scan", compute_psd, trim_spectrum)
 
             _emit(job.id, "Stitching spectrum..." if num_chunks > 1 else "Processing...")
             result = stitch_spectra(segments)
 
             _emit(job.id, "Detecting signals...")
-            from core.dsp import find_peaks as detect_peaks
-            peaks = detect_peaks(result.freqs_mhz, result.power_db)
-            if peaks:
-                _emit(job.id, f"  Found {len(peaks)} signal{'s' if len(peaks) != 1 else ''}")
-                for pk in peaks[:10]:
-                    _emit(job.id, f"    {pk.freq_mhz:.3f} MHz  {pk.power_db:+.1f} dB  (BW ~{pk.bandwidth_khz:.0f} kHz)")
-                if len(peaks) > 10:
-                    _emit(job.id, f"    ... and {len(peaks) - 10} more")
-            else:
-                _emit(job.id, "  No signals above noise floor")
+            peaks = find_peaks(result.freqs_mhz, result.power_db)
+            self._log_peaks(job.id, peaks)
 
             _emit(job.id, "Rendering plot...")
             plot_path = PLOTS_DIR / f"scan_{job.id}.png"
             render_scan_plot(result, p, plot_path, peaks)
 
-            job.result_path = plot_path
-            job.status = JobStatus.COMPLETE
-            job.duration_s = round(time.time() - t0, 2)
-            job.params["peaks"] = [
-                {"freq_mhz": pk.freq_mhz, "power_db": pk.power_db,
-                 "prominence_db": pk.prominence_db, "bandwidth_khz": pk.bandwidth_khz}
-                for pk in peaks
-            ]
+            self._finalize_job(job, t0, plot_path, peaks)
             _emit(job.id, f"Scan complete ({job.duration_s}s)")
 
         except Exception as e:
@@ -193,65 +204,24 @@ class JobRunner:
         p = job.params
 
         try:
-            from core.dsp import (
-                plan_chunks, compute_waterfall, trim_waterfall,
-                stitch_waterfalls, SAMPLE_RATE,
-            )
-            from core.sdr import SDRDevice, CaptureConfig
+            from core.dsp import compute_waterfall, trim_waterfall, stitch_waterfalls, find_peaks
 
-            start_hz = p["start_mhz"] * 1e6
-            stop_hz = p["stop_mhz"] * 1e6
-            centers = plan_chunks(start_hz, stop_hz)
-            num_chunks = len(centers)
-
-            _emit(job.id, f"Waterfall: {p['start_mhz']:.1f} – {p['stop_mhz']:.1f} MHz ({num_chunks} chunk{'s' if num_chunks > 1 else ''})")
+            segments, num_chunks = self._capture_segments(job, "Waterfall", compute_waterfall, trim_waterfall)
             if num_chunks > 1:
-                _emit(job.id, f"  Note: chunks captured sequentially, not simultaneously")
-
-            segments = []
-            for i, fc in enumerate(centers):
-                fc_mhz = fc / 1e6
-                _emit(job.id, f"  [{i+1}/{num_chunks}] Capturing {fc_mhz:.1f} MHz...")
-
-                config = CaptureConfig(
-                    center_freq=fc, sample_rate=SAMPLE_RATE,
-                    duration=p["duration"], gain=p["gain"],
-                )
-                with SDRDevice() as sdr:
-                    capture = sdr.capture(config)
-                data = compute_waterfall(capture)
-
-                if num_chunks > 1:
-                    data = trim_waterfall(data)
-                segments.append(data)
+                _emit(job.id, "  Note: chunks captured sequentially, not simultaneously")
 
             _emit(job.id, "Stitching waterfall..." if num_chunks > 1 else "Processing...")
             result = stitch_waterfalls(segments)
 
             _emit(job.id, "Detecting signals...")
-            from core.dsp import find_peaks as detect_peaks
-            peaks = detect_peaks(result.freqs_mhz, result.mean_psd_db)
-            if peaks:
-                _emit(job.id, f"  Found {len(peaks)} signal{'s' if len(peaks) != 1 else ''}")
-                for pk in peaks[:10]:
-                    _emit(job.id, f"    {pk.freq_mhz:.3f} MHz  {pk.power_db:+.1f} dB  (BW ~{pk.bandwidth_khz:.0f} kHz)")
-                if len(peaks) > 10:
-                    _emit(job.id, f"    ... and {len(peaks) - 10} more")
-            else:
-                _emit(job.id, "  No signals above noise floor")
+            peaks = find_peaks(result.freqs_mhz, result.mean_psd_db)
+            self._log_peaks(job.id, peaks)
 
             _emit(job.id, "Rendering waterfall plot...")
             plot_path = PLOTS_DIR / f"waterfall_{job.id}.png"
             render_waterfall_plot(result, p, plot_path, peaks)
 
-            job.result_path = plot_path
-            job.status = JobStatus.COMPLETE
-            job.duration_s = round(time.time() - t0, 2)
-            job.params["peaks"] = [
-                {"freq_mhz": pk.freq_mhz, "power_db": pk.power_db,
-                 "prominence_db": pk.prominence_db, "bandwidth_khz": pk.bandwidth_khz}
-                for pk in peaks
-            ]
+            self._finalize_job(job, t0, plot_path, peaks)
             _emit(job.id, f"Waterfall complete ({job.duration_s}s)")
 
         except Exception as e:
@@ -266,7 +236,7 @@ class JobRunner:
     # ── Live mode ────────────────────────────────────────
 
     def start_live(self, start_mhz: float, stop_mhz: float, gain: float,
-                    audio_enabled: bool = False, demod_mode: str = "fm") -> None:
+                    audio_enabled: bool = False, demod_mode: DemodMode = DemodMode.FM) -> None:
         """Start continuous spectrum capture with optional audio demod."""
         if self._live_active:
             self.stop_live()
@@ -288,7 +258,6 @@ class JobRunner:
                      audio_enabled, demod_mode, sample_rate)
 
         self._live_active = True
-        import threading
         self._live_thread = threading.Thread(
             target=self._live_loop,
             args=(center_hz, sample_rate, gain, start_mhz, stop_mhz),
@@ -308,7 +277,7 @@ class JobRunner:
         logger.info("live stopped")
         _emit("live", "Live stopped")
 
-    def toggle_audio(self, enabled: bool, demod_mode: str = "fm") -> None:
+    def toggle_audio(self, enabled: bool, demod_mode: DemodMode = DemodMode.FM) -> None:
         """Toggle audio demod on/off while live is running."""
         self._audio_enabled = enabled
         self._demod_mode = demod_mode
@@ -331,7 +300,7 @@ class JobRunner:
         Runs in a worker thread so the next USB capture can overlap.
         """
         import json
-        from core.dsp import compute_psd, find_peaks, demodulate, DemodMode
+        from core.dsp import compute_psd, find_peaks, demodulate
 
         DOWNSAMPLE_POINTS = 1024
 
@@ -373,7 +342,6 @@ class JobRunner:
         This overlaps the ~250ms USB capture with ~70ms of processing,
         so cycle time ≈ max(capture, process) ≈ 250ms instead of their sum.
         """
-        import threading
         from core.sdr import SDRDevice, CaptureConfig
 
         CAPTURE_DURATION = 0.25
@@ -381,6 +349,7 @@ class JobRunner:
         logger.info("live loop starting: fc=%.3f MHz sr=%.0f Hz gain=%.0f dB",
                      center_hz / 1e6, sample_rate, gain)
 
+        frame_count = 0
         try:
             config = CaptureConfig(
                 center_freq=center_hz,
@@ -389,7 +358,6 @@ class JobRunner:
                 duration=CAPTURE_DURATION,
             )
 
-            frame_count = 0
             process_thread: threading.Thread | None = None
 
             with SDRDevice() as sdr:
@@ -418,5 +386,5 @@ class JobRunner:
         finally:
             self._live_active = False
             self._audio_enabled = False
-            logger.info("live loop exited after %d frames", frame_count if 'frame_count' in dir() else 0)
+            logger.info("live loop exited after %d frames", frame_count)
 
