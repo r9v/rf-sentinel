@@ -10,6 +10,23 @@ interface Props {
   onLiveToggle: (active: boolean) => void;
 }
 
+function ScanInfo({ bandwidth, numChunks, duration }: { bandwidth: number; numChunks: number; duration: number }) {
+  const formatEst = () => {
+    const total = numChunks * duration;
+    if (total < 60) return `${total.toFixed(0)}s`;
+    const m = Math.floor(total / 60);
+    const s = Math.round(total % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+  return (
+    <div className="flex justify-between text-xs text-gray-500 px-0.5">
+      <span>BW: <span className="text-gray-400">{bandwidth.toFixed(1)} MHz</span></span>
+      {numChunks > 1 && <span>Chunks: <span className="text-gray-400">{numChunks}</span></span>}
+      {numChunks > 1 && <span>Est: <span className="text-gray-400">~{formatEst()} total</span></span>}
+    </div>
+  );
+}
+
 export default function ControlPanel({ onJobStarted, liveActive, onLiveToggle }: Props) {
   const [mode, setMode] = useState<Mode>('scan');
   const [startMhz, setStartMhz] = useState(97.0);
@@ -114,21 +131,7 @@ export default function ControlPanel({ onJobStarted, liveActive, onLiveToggle }:
               min={24} max={1766} step={0.1} unit="MHz" logScale nudgeSteps={[0.1, 1, 10]} />
           </div>
 
-          <div className="flex justify-between text-xs text-gray-500 px-0.5">
-            <span>BW: <span className="text-gray-400">{bandwidth.toFixed(1)} MHz</span></span>
-            {numChunks > 1 && (
-              <span>Chunks: <span className="text-gray-400">{numChunks}</span></span>
-            )}
-            {numChunks > 1 && (
-              <span>Est: <span className="text-gray-400">~{(() => {
-                const total = numChunks * duration;
-                if (total < 60) return `${total.toFixed(0)}s`;
-                const m = Math.floor(total / 60);
-                const s = Math.round(total % 60);
-                return `${m}:${s.toString().padStart(2, '0')}`;
-              })()} total</span></span>
-            )}
-          </div>
+          <ScanInfo bandwidth={bandwidth} numChunks={numChunks} duration={duration} />
 
           {invalid && (
             <div className="text-xs text-red-400 bg-red-400/5 rounded px-2 py-1.5">

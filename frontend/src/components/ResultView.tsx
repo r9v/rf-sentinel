@@ -4,47 +4,50 @@ interface Props {
   job: JobInfo | null;
 }
 
+function EmptyState() {
+  return (
+    <div className="flex items-center justify-center h-full text-gray-600">
+      <div className="text-center">
+        <div className="text-4xl mb-3 opacity-30">📡</div>
+        <p className="text-sm">Select a job to view results</p>
+      </div>
+    </div>
+  );
+}
+
+function LoadingState({ job }: { job: JobInfo }) {
+  return (
+    <div className="flex items-center justify-center h-full">
+      <div className="text-center">
+        <div className="animate-pulse text-cyan-400 text-lg mb-2">⟳</div>
+        <p className="text-sm text-gray-400">
+          {job.status === 'pending' ? 'Queued...' : 'Processing...'}
+        </p>
+        <p className="text-xs text-gray-600 mt-1 capitalize">{job.type} — {job.params.freq_mhz || 'multi-band'} MHz</p>
+      </div>
+    </div>
+  );
+}
+
+function ErrorState({ job }: { job: JobInfo }) {
+  return (
+    <div className="flex items-center justify-center h-full">
+      <div className="text-center max-w-md">
+        <div className="text-red-400 text-lg mb-2">✗</div>
+        <p className="text-sm text-red-300 mb-2">Job failed</p>
+        <pre className="text-xs text-red-400/70 bg-red-900/10 rounded p-3 text-left whitespace-pre-wrap">
+          {job.error}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
 export default function ResultView({ job }: Props) {
-  if (!job) {
-    return (
-      <div className="flex items-center justify-center h-full text-gray-600">
-        <div className="text-center">
-          <div className="text-4xl mb-3 opacity-30">📡</div>
-          <p className="text-sm">Select a job to view results</p>
-        </div>
-      </div>
-    );
-  }
+  if (!job) return <EmptyState />;
+  if (job.status === 'pending' || job.status === 'running') return <LoadingState job={job} />;
+  if (job.status === 'error') return <ErrorState job={job} />;
 
-  if (job.status === 'pending' || job.status === 'running') {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center">
-          <div className="animate-pulse text-cyan-400 text-lg mb-2">⟳</div>
-          <p className="text-sm text-gray-400">
-            {job.status === 'pending' ? 'Queued...' : 'Processing...'}
-          </p>
-          <p className="text-xs text-gray-600 mt-1 capitalize">{job.type} — {job.params.freq_mhz || 'multi-band'} MHz</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (job.status === 'error') {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center max-w-md">
-          <div className="text-red-400 text-lg mb-2">✗</div>
-          <p className="text-sm text-red-300 mb-2">Job failed</p>
-          <pre className="text-xs text-red-400/70 bg-red-900/10 rounded p-3 text-left whitespace-pre-wrap">
-            {job.error}
-          </pre>
-        </div>
-      </div>
-    );
-  }
-
-  // Complete — show the plot
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700/50">
