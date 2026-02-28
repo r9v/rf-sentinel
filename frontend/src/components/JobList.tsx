@@ -20,6 +20,10 @@ const TYPE_ICON: Record<string, string> = {
   sweep: '📡',
 };
 
+const jobCardBtn = 'w-full text-left px-3 py-2 rounded-lg border transition-all';
+const jobCardSelected = 'border-cyan-500/40 bg-cyan-500/5';
+const jobCardDefault = 'border-gray-700/50 hover:border-gray-600 bg-gray-800/30';
+
 interface JobCardProps {
   job: JobInfo;
   selected: boolean;
@@ -30,11 +34,7 @@ function JobCard({ job, selected, onSelect }: JobCardProps) {
   return (
     <button
       onClick={() => onSelect(job)}
-      className={`w-full text-left px-3 py-2 rounded-lg border transition-all
-        ${selected
-          ? 'border-cyan-500/40 bg-cyan-500/5'
-          : 'border-gray-700/50 hover:border-gray-600 bg-gray-800/30'
-        }`}
+      className={`${jobCardBtn} ${selected ? jobCardSelected : jobCardDefault}`}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">

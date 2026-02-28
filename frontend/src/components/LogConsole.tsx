@@ -7,6 +7,9 @@ interface Props {
   onClear: () => void;
 }
 
+const statusDot = 'w-2 h-2 rounded-full';
+const logRow = 'text-gray-300';
+
 export default function LogConsole({ logs, connected, onClear }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -19,7 +22,7 @@ export default function LogConsole({ logs, connected, onClear }: Props) {
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700/50">
         <div className="flex items-center gap-2">
           <span className="text-xs font-mono text-gray-400 uppercase tracking-wider">Console</span>
-          <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
+          <span className={`${statusDot} ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
         </div>
         <button
           onClick={onClear}
@@ -35,7 +38,7 @@ export default function LogConsole({ logs, connected, onClear }: Props) {
         {logs.map((log, i) => (
           <div
             key={i}
-            className={`text-gray-300 ${i === logs.length - 1 ? 'log-new' : ''}`}
+            className={`${logRow}${i === logs.length - 1 ? ' log-new' : ''}`}
           >
             <span className="text-gray-600 mr-2">
               {new Date(log.timestamp).toLocaleTimeString('en-GB')}

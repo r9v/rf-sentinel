@@ -9,6 +9,8 @@ import LiveSpectrum, { SpectrumFrame } from './components/LiveSpectrum';
 
 const WS_URL = `ws://${window.location.hostname}:8900/api/ws`;
 
+const statusDot = 'w-2 h-2 rounded-full';
+
 // ── Local components ─────────────────────────────────────
 
 function Header({ liveActive, serverOnline }: { liveActive: boolean; serverOnline: boolean }) {
@@ -27,7 +29,7 @@ function Header({ liveActive, serverOnline }: { liveActive: boolean; serverOnlin
           </span>
         )}
         <div className="flex items-center gap-1.5">
-          <span className={`w-2 h-2 rounded-full ${serverOnline ? 'bg-green-400' : 'bg-red-400'}`} />
+          <span className={`${statusDot} ${serverOnline ? 'bg-green-400' : 'bg-red-400'}`} />
           <span className="text-xs text-gray-500">
             {serverOnline ? 'Server online' : 'Disconnected'}
           </span>

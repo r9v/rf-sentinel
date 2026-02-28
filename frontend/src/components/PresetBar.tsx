@@ -46,6 +46,10 @@ const PRESET_GROUPS: PresetGroup[] = [
   },
 ];
 
+const presetBtn = 'px-2 py-1 text-xs rounded border transition-all';
+const presetBtnActive = 'border-cyan-500/50 text-cyan-300 bg-cyan-500/10';
+const presetBtnInactive = 'border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300';
+
 export default function PresetBar({ activeStart, activeStop, onSelect }: Props) {
   return (
     <div className="space-y-2">
@@ -60,11 +64,7 @@ export default function PresetBar({ activeStart, activeStop, onSelect }: Props) 
                 key={p.label}
                 onClick={() => onSelect(p.startMhz, p.stopMhz)}
                 title={p.antenna ? `🔌 ${p.antenna}` : undefined}
-                className={`px-2 py-1 text-xs rounded border transition-all
-                  ${activeStart === p.startMhz && activeStop === p.stopMhz
-                    ? 'border-cyan-500/50 text-cyan-300 bg-cyan-500/10'
-                    : 'border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300'
-                  }`}
+                className={`${presetBtn} ${activeStart === p.startMhz && activeStop === p.stopMhz ? presetBtnActive : presetBtnInactive}`}
               >
                 {p.label}
               </button>

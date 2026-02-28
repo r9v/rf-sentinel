@@ -26,6 +26,9 @@ function logToLin(position: number, min: number, max: number): number {
   return Math.pow(10, logMin + position * (logMax - logMin));
 }
 
+const numInput = 'w-20 text-xs text-right text-cyan-300 font-mono bg-gray-800 border border-cyan-500/40 rounded px-1.5 py-0.5 outline-none focus:border-cyan-400 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
+const rangeInput = 'w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-cyan-400 [&::-webkit-slider-thumb]:cursor-pointer';
+
 export default function ParamSlider({
   label, value, onChange, min, max, step, unit,
   logScale = false, showSlider = true, nudgeSteps,
@@ -123,10 +126,7 @@ export default function ParamSlider({
                 min={min}
                 max={max}
                 step={step}
-                className="w-20 text-xs text-right text-cyan-300 font-mono bg-gray-800 border
-                  border-cyan-500/40 rounded px-1.5 py-0.5 outline-none focus:border-cyan-400
-                  [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none
-                  [&::-webkit-outer-spin-button]:appearance-none"
+                className={numInput}
               />
               <span className="text-xs text-gray-500">{unit}</span>
             </div>
@@ -155,10 +155,7 @@ export default function ParamSlider({
           min={sliderMin}
           max={sliderMax}
           step={sliderStep}
-          className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer
-            [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3
-            [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full
-            [&::-webkit-slider-thumb]:bg-cyan-400 [&::-webkit-slider-thumb]:cursor-pointer"
+          className={rangeInput}
         />
       )}
     </div>

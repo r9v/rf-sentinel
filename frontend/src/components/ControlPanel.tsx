@@ -10,6 +10,12 @@ interface Props {
   onLiveToggle: (active: boolean) => void;
 }
 
+const submitBtn = 'w-full py-2.5 rounded-lg font-medium text-sm transition-all';
+const submitBtnDisabled = 'bg-gray-700 text-gray-400 cursor-not-allowed';
+const submitBtnLiveActive = 'bg-red-600 hover:bg-red-500 text-white animate-pulse';
+const submitBtnLive = 'bg-red-600 hover:bg-red-500 text-white';
+const submitBtnScan = 'bg-cyan-600 hover:bg-cyan-500 text-white glow-accent';
+
 function ScanInfo({ bandwidth, numChunks, duration }: { bandwidth: number; numChunks: number; duration: number }) {
   const formatEst = () => {
     const total = numChunks * duration;
@@ -150,15 +156,11 @@ export default function ControlPanel({ onJobStarted, liveActive, onLiveToggle }:
       <button
         onClick={handleSubmit}
         disabled={loading || !canRun}
-        className={`w-full py-2.5 rounded-lg font-medium text-sm transition-all
-          ${loading || !canRun
-            ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-            : isLive
-              ? liveActive
-                ? 'bg-red-600 hover:bg-red-500 text-white animate-pulse'
-                : 'bg-red-600 hover:bg-red-500 text-white'
-              : 'bg-cyan-600 hover:bg-cyan-500 text-white glow-accent'
-          }`}
+        className={`${submitBtn} ${
+          loading || !canRun ? submitBtnDisabled
+          : isLive ? (liveActive ? submitBtnLiveActive : submitBtnLive)
+          : submitBtnScan
+        }`}
       >
         {isLive
           ? liveActive ? '■ Stop Live' : '● Start Live'
