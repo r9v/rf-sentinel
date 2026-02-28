@@ -23,34 +23,16 @@ def set_loop(loop: asyncio.AbstractEventLoop) -> None:
     _loop = loop
 
 
-def client_count() -> int:
-    return len(_ws_clients)
-
-
-async def _broadcast(payload: str) -> None:
-    """Send a text payload to all connected WebSocket clients."""
+async def _broadcast(clients: list[WebSocket], sender) -> None:
+    """Send data to all clients in a list, removing dead ones."""
     dead = []
-    for ws in _ws_clients:
+    for ws in clients:
         try:
-            await ws.send_text(payload)
+            await sender(ws)
         except Exception:
             dead.append(ws)
     for ws in dead:
-        _ws_clients.remove(ws)
-
-
-async def _broadcast_bytes(data: bytes) -> None:
-    """Send binary audio data to dedicated audio WebSocket clients."""
-    dead = []
-    for ws in _audio_ws_clients:
-        try:
-            await ws.send_bytes(data)
-        except Exception:
-            dead.append(ws)
-    for ws in dead:
-        _audio_ws_clients.remove(ws)
-    if dead:
-        logger.debug("audio broadcast: dropped %d dead clients", len(dead))
+        clients.remove(ws)
 
 
 def log_callback(job_id: str, message: str) -> None:
@@ -61,7 +43,9 @@ def log_callback(job_id: str, message: str) -> None:
         payload = message  # already serialized JSON
     else:
         payload = json.dumps({"type": "log", "job_id": job_id, "message": message})
-    asyncio.run_coroutine_threadsafe(_broadcast(payload), _loop)
+    asyncio.run_coroutine_threadsafe(
+        _broadcast(_ws_clients, lambda ws: ws.send_text(payload)), _loop,
+    )
 
 
 def audio_callback(data: bytes) -> None:
@@ -70,7 +54,9 @@ def audio_callback(data: bytes) -> None:
         return
     if not _audio_ws_clients:
         return
-    asyncio.run_coroutine_threadsafe(_broadcast_bytes(data), _loop)
+    asyncio.run_coroutine_threadsafe(
+        _broadcast(_audio_ws_clients, lambda ws: ws.send_bytes(data)), _loop,
+    )
 
 
 @router.websocket("/api/ws")
@@ -95,9 +81,7 @@ async def audio_websocket_endpoint(ws: WebSocket) -> None:
     logger.info(f"Audio WS connected ({len(_audio_ws_clients)} audio clients)")
     try:
         while True:
-            data = await ws.receive_text()
-            if data == "ping":
-                await ws.send_text("pong")
+            await ws.receive_text()
     except WebSocketDisconnect:
         _audio_ws_clients.remove(ws)
         logger.info(f"Audio WS disconnected ({len(_audio_ws_clients)} audio clients)")

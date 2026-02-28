@@ -351,10 +351,6 @@ class JobRunner:
                    gain: float, start_mhz: float, stop_mhz: float) -> None:
         """Continuous capture loop with pipelined processing.
 
-        Small capture chunks (50ms) for smooth audio delivery.
-        Spectrum is only computed every SPECTRUM_EVERY frames (~250ms)
-        to keep CPU and WS overhead low.
-
         Pipeline: process frame N in a worker thread while capturing frame N+1.
         """
         from core.sdr import SDRDevice, CaptureConfig
