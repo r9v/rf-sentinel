@@ -463,8 +463,9 @@ class JobRunner:
                 sdr.start_stream(on_chunk, chunk_samples)
 
         except Exception as e:
-            _emit("live", f"Live error: {e}")
-            logger.error(traceback.format_exc())
+            if self._live_active:
+                _emit("live", f"Live error: {e}")
+                logger.error(traceback.format_exc())
         finally:
             self._live_active = False
             self._audio_enabled = False

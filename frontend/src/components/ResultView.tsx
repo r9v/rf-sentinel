@@ -104,7 +104,7 @@ export default function ResultView({ job }: Props) {
   return (
     <div className="flex flex-col h-full">
       <JobHeader job={job} />
-      <div className="flex-1 overflow-auto p-2 flex items-center justify-center">
+      <div className={`flex-1 min-h-0 ${job.type === 'scan' ? '' : 'overflow-auto p-2 flex items-center justify-center'}`}>
         {job.type === 'scan' ? <ScanResult job={job} /> : <WaterfallResult job={job} />}
       </div>
     </div>

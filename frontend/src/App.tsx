@@ -93,7 +93,7 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
 }) {
   return (
     <div className="flex-1 min-w-0 flex flex-col">
-      <div className="flex-1 border-b border-gray-800 flex items-center justify-center overflow-hidden">
+      <div className="flex-1 border-b border-gray-800 overflow-hidden">
         {liveActive || liveFrame ? (
           <SpectrumChart frame={liveFrame} mode="live" vfoFreq={vfoFreq} onFreqClick={onFreqClick} />
         ) : (
