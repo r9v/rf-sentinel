@@ -1,5 +1,6 @@
+import { useCallback, useRef, useState } from 'react';
 import { JobInfo } from '../api';
-import SpectrumChart from './SpectrumChart';
+import SpectrumChart, { ChartView, DualRangeSlider } from './SpectrumChart';
 import WaterfallCanvas from './WaterfallCanvas';
 
 interface Props {
@@ -87,9 +88,55 @@ function ScanResult({ job }: { job: JobInfo }) {
 }
 
 function WaterfallResult({ job }: { job: JobInfo }) {
+  const [chartView, setChartView] = useState<ChartView | null>(null);
+  const [dataDbRange, setDataDbRange] = useState<[number, number]>([-120, -20]);
+  const [dbRange, setDbRange] = useState<[number, number] | null>(null);
+  const dataDbRef = useRef(dataDbRange);
+
+  const onDataDbRange = useCallback((min: number, max: number) => {
+    const r: [number, number] = [Math.floor(min), Math.ceil(max)];
+    if (r[0] !== dataDbRef.current[0] || r[1] !== dataDbRef.current[1]) {
+      dataDbRef.current = r;
+      setDataDbRange(r);
+    }
+  }, []);
+
   const wd = job.params.waterfall_data;
   if (!wd) return <p className="text-gray-500 text-sm">No waterfall data available</p>;
-  return <WaterfallCanvas resultData={wd} />;
+
+  const sd = job.params.spectrum_data;
+  const frame = sd ? {
+    freqs_mhz: sd.freqs_mhz,
+    power_db: sd.power_db,
+    peaks: job.params.peaks ?? [],
+  } : null;
+
+  const sliderLo = dbRange ? dbRange[0] : dataDbRange[0];
+  const sliderHi = dbRange ? dbRange[1] : dataDbRange[1];
+
+  return (
+    <div className="flex flex-col h-full">
+      {frame && (
+        <div className="flex-[2] min-h-0">
+          <SpectrumChart frame={frame} mode="scan" onViewChange={setChartView} />
+        </div>
+      )}
+      <div className="flex-1 min-h-0 flex">
+        <div className="flex-1 min-w-0">
+          <WaterfallCanvas resultData={wd} view={chartView} dbRange={dbRange} onDataDbRange={onDataDbRange} />
+        </div>
+        <div className="flex-shrink-0 py-1" style={{ width: 24 }}>
+          <DualRangeSlider
+            lo={sliderLo} hi={sliderHi}
+            min={dataDbRange[0]} max={dataDbRange[1]}
+            onChange={(lo, hi) => setDbRange([lo, hi])}
+            onReset={() => setDbRange(null)}
+            vertical snapStep={1} precision={0}
+          />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function ResultView({ job }: Props) {

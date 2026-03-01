@@ -280,12 +280,12 @@ function wheelZoomPlugin(
 
 // ── Dual-thumb range slider ──────────────────────────────
 
-const hThumb = 'absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-cyan-400 cursor-ew-resize hover:bg-cyan-300 z-10';
-const vThumb = 'absolute left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-cyan-400 cursor-ns-resize hover:bg-cyan-300 z-10';
+export const hThumb = 'absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-cyan-400 cursor-ew-resize hover:bg-cyan-300 z-10';
+export const vThumb = 'absolute left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-cyan-400 cursor-ns-resize hover:bg-cyan-300 z-10';
 
-interface SliderMarker { pos: number; color: string }
+export interface SliderMarker { pos: number; color: string }
 
-function DualRangeSlider({ lo, hi, min, max, onChange, onReset, vertical, snapStep = 0.1, precision = 1, markers }: {
+export function DualRangeSlider({ lo, hi, min, max, onChange, onReset, vertical, snapStep = 0.1, precision = 1, markers }: {
   lo: number; hi: number; min: number; max: number;
   onChange: (lo: number, hi: number) => void;
   onReset: () => void;

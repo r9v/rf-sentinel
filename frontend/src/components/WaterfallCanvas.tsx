@@ -5,6 +5,8 @@ interface Props {
   frame?: SpectrumFrame | null;
   view?: ChartView | null;
   resultData?: { freqs_mhz: number[]; power_db: number[][]; duration_s?: number } | null;
+  dbRange?: [number, number] | null;
+  onDataDbRange?: (min: number, max: number) => void;
 }
 
 const TARGET_SECONDS = 60;
@@ -40,7 +42,7 @@ interface Row {
   cacheKey: number;
 }
 
-export default function WaterfallCanvas({ frame, view, resultData }: Props) {
+export default function WaterfallCanvas({ frame, view, resultData, dbRange, onDataDbRange }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 400, h: 192 });
@@ -123,7 +125,7 @@ export default function WaterfallCanvas({ frame, view, resultData }: Props) {
   useEffect(() => {
     if (!resultData?.freqs_mhz.length || !resultData.power_db.length) return;
     renderResult();
-  }, [resultData, size]);
+  }, [resultData, size, view?.xStart, view?.xEnd, view?.padLeft, view?.padRight, dbRange?.[0], dbRange?.[1]]);
 
   function renderResult() {
     if (!resultData?.freqs_mhz.length || !resultData.power_db.length) return;
@@ -139,11 +141,12 @@ export default function WaterfallCanvas({ frame, view, resultData }: Props) {
     const { freqs_mhz, power_db } = resultData;
     const nRows = power_db.length;
     const totalTime = resultData.duration_s || nRows * 0.05;
-    const xStart = freqs_mhz[0];
-    const xEnd = freqs_mhz[freqs_mhz.length - 1];
+    const xStart = view?.xStart ?? freqs_mhz[0];
+    const xEnd = view?.xEnd ?? freqs_mhz[freqs_mhz.length - 1];
 
-    const padLeft = Math.round(50 * dpr);
-    const padRight = Math.round(10 * dpr);
+    const hasChart = !!view;
+    const padLeft = hasChart ? Math.round(view.padLeft * dpr) : Math.round(50 * dpr);
+    const padRight = hasChart ? Math.round((view.padRight - 24) * dpr) : Math.round(10 * dpr);
     const padTop = Math.round(5 * dpr);
     const padBottom = Math.round(24 * dpr);
     const dataW = devW - padLeft - padRight;
@@ -157,8 +160,14 @@ export default function WaterfallCanvas({ frame, view, resultData }: Props) {
         if (v > dbMax) dbMax = v;
       }
     }
-    dbMinRef.current = dbMin;
-    dbMaxRef.current = dbMax;
+    onDataDbRange?.(dbMin, dbMax);
+    if (dbRange) {
+      dbMinRef.current = dbRange[0];
+      dbMaxRef.current = dbRange[1];
+    } else {
+      dbMinRef.current = dbMin;
+      dbMaxRef.current = dbMax;
+    }
 
     const wf = getWf(dataW, dataH);
     wf.u32.fill(BG_U32);

@@ -246,10 +246,15 @@ class JobRunner:
             freq_step = max(1, len(result.freqs_mhz) // 1024)
             time_step = max(1, result.power_db.shape[1] // 256)
             power_ds = result.power_db[::freq_step, ::time_step]
+            freqs_ds = np.round(result.freqs_mhz[::freq_step], 4).tolist()
             job.params["waterfall_data"] = {
-                "freqs_mhz": np.round(result.freqs_mhz[::freq_step], 4).tolist(),
+                "freqs_mhz": freqs_ds,
                 "power_db": np.round(power_ds.T, 1).tolist(),
                 "duration_s": round(float(result.times[-1]), 2),
+            }
+            job.params["spectrum_data"] = {
+                "freqs_mhz": freqs_ds,
+                "power_db": np.round(result.mean_psd_db[::freq_step], 1).tolist(),
             }
 
             self._finalize_job(job, t0, None, peaks)
