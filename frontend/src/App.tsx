@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWebSocket, LogEntry } from './hooks/useWebSocket';
 import { useAudioPlayer } from './hooks/useAudioPlayer';
-import { JobInfo, setVfo } from './api';
+import { JobInfo, setVfo, toggleAudio } from './api';
 import ControlPanel from './components/ControlPanel';
 import LogConsole from './components/LogConsole';
 import JobList from './components/JobList';
@@ -48,12 +48,14 @@ function Header({ liveActive, audioEnabled, serverOnline }: {
   );
 }
 
-function Sidebar({ liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, jobs, selectedJob, onSelectJob }: {
+function Sidebar({ liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange, jobs, selectedJob, onSelectJob }: {
   liveActive: boolean;
   audioEnabled: boolean;
   onLiveToggle: (active: boolean) => void;
   onAudioToggle: (enabled: boolean) => void;
   onVolumeChange: (v: number) => void;
+  vfoFreq: number | null;
+  onVfoChange: (freq_mhz: number) => void;
   jobs: JobInfo[];
   selectedJob: JobInfo | null;
   onSelectJob: (job: JobInfo | null) => void;
@@ -67,6 +69,8 @@ function Sidebar({ liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolu
           audioEnabled={audioEnabled}
           onAudioToggle={onAudioToggle}
           onVolumeChange={onVolumeChange}
+          vfoFreq={vfoFreq}
+          onVfoChange={onVfoChange}
         />
       </div>
       <div className="flex-1 overflow-y-auto p-3">
@@ -120,7 +124,12 @@ export default function App() {
     if (!liveActive) return;
     setVfoFreq(freq_mhz);
     setVfo(freq_mhz).catch(() => {});
-  }, [liveActive]);
+    if (!audioEnabled) {
+      toggleAudio({ enabled: true, demod_mode: 'fm' }).catch(() => {});
+      setAudioEnabled(true);
+      audio.start();
+    }
+  }, [liveActive, audioEnabled, audio]);
 
   useEffect(() => {
     if (lastMessage && lastMessage.type === 'spectrum') {
@@ -131,13 +140,22 @@ export default function App() {
         peaks: lastMessage.peaks,
       });
       setVfoFreq(prev => {
-        if (prev != null) return prev;
+        if (prev != null) {
+          if (prev < freqs[0] || prev > freqs[freqs.length - 1]) {
+            setAudioEnabled(false);
+            audio.stop();
+            const center = (freqs[0] + freqs[freqs.length - 1]) / 2;
+            setVfo(center).catch(() => {});
+            return center;
+          }
+          return prev;
+        }
         const center = (freqs[0] + freqs[freqs.length - 1]) / 2;
         setVfo(center).catch(() => {});
         return center;
       });
     }
-  }, [lastMessage]);
+  }, [lastMessage, audio]);
 
   const handleLiveToggle = useCallback((active: boolean) => {
     setLiveActive(active);
@@ -168,6 +186,8 @@ export default function App() {
           onLiveToggle={handleLiveToggle}
           onAudioToggle={handleAudioToggle}
           onVolumeChange={audio.setVolume}
+          vfoFreq={vfoFreq}
+          onVfoChange={handleFreqClick}
           jobs={jobs}
           selectedJob={selectedJob}
           onSelectJob={setSelectedJob}
@@ -179,7 +199,7 @@ export default function App() {
           logs={logs}
           connected={connected}
           onClear={clearLogs}
-          vfoFreq={vfoFreq}
+          vfoFreq={audioEnabled ? vfoFreq : null}
           onFreqClick={handleFreqClick}
         />
       </div>

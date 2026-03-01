@@ -177,6 +177,7 @@ export function useAudioPlayer(audioWsUrl?: string): UseAudioPlayerReturn {
   const workletRef = useRef<AudioWorkletNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
   const workerRef = useRef<Worker | null>(null);
+  const volumeRef = useRef(0.5);
   const stateRef = useRef<AudioState>('stopped');
   const [stateForRender, setStateForRender] = useState<AudioState>('stopped');
 
@@ -235,7 +236,7 @@ export function useAudioPlayer(audioWsUrl?: string): UseAudioPlayerReturn {
 
       // Gain node for volume control
       const gain = ctx.createGain();
-      gain.gain.value = 0.5;
+      gain.gain.value = volumeRef.current;
       gainRef.current = gain;
 
       worklet.connect(gain);
@@ -275,8 +276,10 @@ export function useAudioPlayer(audioWsUrl?: string): UseAudioPlayerReturn {
   const stop = useCallback(() => stopInternal(), []);
 
   const setVolume = useCallback((v: number) => {
+    const clamped = Math.max(0, Math.min(1, v));
+    volumeRef.current = clamped;
     if (gainRef.current) {
-      gainRef.current.gain.value = Math.max(0, Math.min(1, v));
+      gainRef.current.gain.value = clamped;
     }
   }, []);
 

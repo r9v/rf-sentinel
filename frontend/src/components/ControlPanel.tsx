@@ -80,6 +80,8 @@ interface Props {
   audioEnabled: boolean;
   onAudioToggle: (enabled: boolean) => void;
   onVolumeChange: (v: number) => void;
+  vfoFreq: number | null;
+  onVfoChange: (freq_mhz: number) => void;
 }
 
 const submitBtn = 'w-full py-2.5 rounded-lg font-medium text-sm transition-all';
@@ -188,7 +190,7 @@ function AudioControls({ liveActive, audioEnabled, onToggle, demodMode, onDemodM
   );
 }
 
-export default function ControlPanel({ liveActive, onLiveToggle, audioEnabled, onAudioToggle, onVolumeChange }: Props) {
+export default function ControlPanel({ liveActive, onLiveToggle, audioEnabled, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange }: Props) {
   const [mode, setMode] = useState<Mode>('scan');
   const [startMhz, setStartMhz] = useState(97.0);
   const [stopMhz, setStopMhz] = useState(99.0);
@@ -344,7 +346,18 @@ export default function ControlPanel({ liveActive, onLiveToggle, audioEnabled, o
         {inputsOpen && (
           <div className="mt-2 space-y-3">
             {isLive ? (
-              <FreqInput label="Center Freq" value={centerMhz} onChange={setCenterMhz} min={24} max={1766} />
+              <>
+                <FreqInput label="Center Freq" value={centerMhz} onChange={setCenterMhz} min={24} max={1766} />
+                {liveActive && vfoFreq != null && (
+                  <FreqInput
+                    label="VFO Freq"
+                    value={vfoFreq}
+                    onChange={onVfoChange}
+                    min={+(centerMhz - 1.0).toFixed(1)}
+                    max={+(centerMhz + 1.0).toFixed(1)}
+                  />
+                )}
+              </>
             ) : (
               <>
                 <FreqInput label="Start Freq" value={startMhz} onChange={setStartMhz} min={24} max={1766} />
