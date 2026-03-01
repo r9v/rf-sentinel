@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from core.api import ws
 from core.api.routes import create_routes
-from core.api.runner import JobRunner, set_log_callback, set_audio_callback, PLOTS_DIR
+from core.api.runner import JobRunner, set_log_callback, set_audio_callback, set_job_status_callback, PLOTS_DIR
 
 logger = logging.getLogger("rfsentinel.server")
 
@@ -48,6 +48,7 @@ async def _startup() -> None:
     ws.set_loop(asyncio.get_running_loop())
     set_log_callback(ws.log_callback)
     set_audio_callback(ws.audio_callback)
+    set_job_status_callback(ws.job_status_callback)
     logger.info("RFSentinel server started (audio support enabled)")
 
 

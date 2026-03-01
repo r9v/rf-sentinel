@@ -7,7 +7,6 @@ import ParamSlider from './ParamSlider';
 export type DemodMode = 'fm' | 'am';
 
 interface Props {
-  onJobStarted: () => void;
   liveActive: boolean;
   onLiveToggle: (active: boolean) => void;
   audioEnabled: boolean;
@@ -121,7 +120,7 @@ function AudioControls({ liveActive, audioEnabled, onToggle, volume, onVolumeCha
   );
 }
 
-export default function ControlPanel({ onJobStarted, liveActive, onLiveToggle, audioEnabled, onAudioToggle, onVolumeChange }: Props) {
+export default function ControlPanel({ liveActive, onLiveToggle, audioEnabled, onAudioToggle, onVolumeChange }: Props) {
   const [mode, setMode] = useState<Mode>('scan');
   const [startMhz, setStartMhz] = useState(97.0);
   const [stopMhz, setStopMhz] = useState(99.0);
@@ -184,7 +183,6 @@ export default function ControlPanel({ onJobStarted, liveActive, onLiveToggle, a
       } else {
         await startWaterfall(params);
       }
-      onJobStarted();
     } catch (e) {
       console.error('Failed to start job:', e);
     } finally {

@@ -40,6 +40,7 @@ class Job:
 # Global callbacks — set by the server to push messages via WebSocket
 _log_callback: Optional[Callable[[str, str], None]] = None
 _audio_callback: Optional[Callable[[bytes], None]] = None
+_job_status_callback: Optional[Callable[[dict], None]] = None
 
 
 def set_log_callback(cb: Callable[[str, str], None]) -> None:
@@ -50,6 +51,11 @@ def set_log_callback(cb: Callable[[str, str], None]) -> None:
 def set_audio_callback(cb: Callable[[bytes], None]) -> None:
     global _audio_callback
     _audio_callback = cb
+
+
+def set_job_status_callback(cb: Callable[[dict], None]) -> None:
+    global _job_status_callback
+    _job_status_callback = cb
 
 
 def _emit(job_id: str, msg: str) -> None:
@@ -63,6 +69,21 @@ def _emit_audio(pcm_bytes: bytes) -> None:
     """Send binary PCM audio to the WebSocket callback."""
     if _audio_callback:
         _audio_callback(pcm_bytes)
+
+
+def _emit_job_status(job: "Job") -> None:
+    """Push job status update to the WebSocket callback."""
+    if _job_status_callback:
+        _job_status_callback({
+            "id": job.id,
+            "type": job.type,
+            "status": job.status.value,
+            "params": job.params,
+            "result_url": f"/api/plots/{job.result_path.name}" if job.result_path else None,
+            "error": job.error,
+            "created_at": job.created_at.isoformat(),
+            "duration_s": job.duration_s,
+        })
 
 
 class JobRunner:
@@ -84,6 +105,7 @@ class JobRunner:
         job_id = uuid.uuid4().hex[:12]
         job = Job(id=job_id, type=job_type, status=JobStatus.PENDING, params=params)
         self.jobs[job_id] = job
+        _emit_job_status(job)
         self._pool.submit(run_fn, job)
         return job
 
@@ -162,11 +184,13 @@ class JobRunner:
         job.status = JobStatus.COMPLETE
         job.duration_s = round(time.time() - t0, 2)
         job.params["peaks"] = self._serialize_peaks(peaks)
+        _emit_job_status(job)
 
     # ── Scan (stitched) ─────────────────────────────────
 
     def _run_scan(self, job: Job) -> None:
         job.status = JobStatus.RUNNING
+        _emit_job_status(job)
         t0 = time.time()
         p = job.params
 
@@ -193,6 +217,7 @@ class JobRunner:
             job.status = JobStatus.ERROR
             job.error = str(e)
             job.duration_s = round(time.time() - t0, 2)
+            _emit_job_status(job)
             _emit(job.id, f"ERROR: {e}")
             logger.error(traceback.format_exc())
         finally:
@@ -202,6 +227,7 @@ class JobRunner:
 
     def _run_waterfall(self, job: Job) -> None:
         job.status = JobStatus.RUNNING
+        _emit_job_status(job)
         t0 = time.time()
         p = job.params
 
@@ -230,6 +256,7 @@ class JobRunner:
             job.status = JobStatus.ERROR
             job.error = str(e)
             job.duration_s = round(time.time() - t0, 2)
+            _emit_job_status(job)
             _emit(job.id, f"ERROR: {e}")
             logger.error(traceback.format_exc())
         finally:

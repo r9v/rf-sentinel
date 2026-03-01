@@ -16,11 +16,6 @@ export interface JobInfo {
   duration_s: number | null;
 }
 
-export async function getStatus(): Promise<{ status: string }> {
-  const res = await fetch(`${API}/api/status`);
-  return res.json();
-}
-
 export async function startScan(params: {
   start_mhz: number;
   stop_mhz: number;
@@ -46,16 +41,6 @@ export async function startWaterfall(params: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
   });
-  return res.json();
-}
-
-export async function getJobs(): Promise<JobInfo[]> {
-  const res = await fetch(`${API}/api/jobs`);
-  return res.json();
-}
-
-export async function getJob(id: string): Promise<JobInfo> {
-  const res = await fetch(`${API}/api/jobs/${id}`);
   return res.json();
 }
 

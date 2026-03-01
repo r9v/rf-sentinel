@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWebSocket, LogEntry } from './hooks/useWebSocket';
 import { useAudioPlayer } from './hooks/useAudioPlayer';
-import { getStatus, JobInfo } from './api';
+import { JobInfo } from './api';
 import ControlPanel from './components/ControlPanel';
 import LogConsole from './components/LogConsole';
 import JobList from './components/JobList';
@@ -48,22 +48,20 @@ function Header({ liveActive, audioEnabled, serverOnline }: {
   );
 }
 
-function Sidebar({ liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, selectedJob, onSelectJob }: {
+function Sidebar({ liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, jobs, selectedJob, onSelectJob }: {
   liveActive: boolean;
   audioEnabled: boolean;
   onLiveToggle: (active: boolean) => void;
   onAudioToggle: (enabled: boolean) => void;
   onVolumeChange: (v: number) => void;
+  jobs: JobInfo[];
   selectedJob: JobInfo | null;
   onSelectJob: (job: JobInfo | null) => void;
 }) {
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-
   return (
     <aside className="w-72 border-r border-gray-800 flex flex-col">
       <div className="p-3 border-b border-gray-800/50 flex-shrink-0">
         <ControlPanel
-          onJobStarted={() => setRefreshTrigger(n => n + 1)}
           liveActive={liveActive}
           onLiveToggle={onLiveToggle}
           audioEnabled={audioEnabled}
@@ -74,7 +72,7 @@ function Sidebar({ liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolu
       <div className="flex-1 overflow-y-auto p-3">
         <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Jobs</h3>
         <JobList
-          refreshTrigger={refreshTrigger}
+          jobs={jobs}
           onSelectJob={onSelectJob}
           selectedJobId={selectedJob?.id || null}
         />
@@ -111,26 +109,11 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
 
 export default function App() {
   const audio = useAudioPlayer(AUDIO_WS_URL);
-  const { connected, logs, clearLogs, lastMessage } = useWebSocket(WS_URL);
-  const [serverOnline, setServerOnline] = useState(false);
+  const { connected, logs, clearLogs, lastMessage, jobs } = useWebSocket(WS_URL);
   const [selectedJob, setSelectedJob] = useState<JobInfo | null>(null);
   const [liveActive, setLiveActive] = useState(false);
   const [liveFrame, setLiveFrame] = useState<SpectrumFrame | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(false);
-
-  useEffect(() => {
-    const check = async () => {
-      try {
-        await getStatus();
-        setServerOnline(true);
-      } catch {
-        setServerOnline(false);
-      }
-    };
-    check();
-    const interval = setInterval(check, 10000);
-    return () => clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     if (lastMessage && lastMessage.type === 'spectrum') {
@@ -162,7 +145,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0a0e1a] text-gray-100">
-      <Header liveActive={liveActive} audioEnabled={audioEnabled} serverOnline={serverOnline} />
+      <Header liveActive={liveActive} audioEnabled={audioEnabled} serverOnline={connected} />
       <div className="flex h-[calc(100vh-45px)]">
         <Sidebar
           liveActive={liveActive}
@@ -170,6 +153,7 @@ export default function App() {
           onLiveToggle={handleLiveToggle}
           onAudioToggle={handleAudioToggle}
           onVolumeChange={audio.setVolume}
+          jobs={jobs}
           selectedJob={selectedJob}
           onSelectJob={setSelectedJob}
         />

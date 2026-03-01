@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getJobs, JobInfo } from '../api';
+import { JobInfo } from '../api';
 
 interface Props {
-  refreshTrigger: number;
+  jobs: JobInfo[];
   onSelectJob: (job: JobInfo) => void;
   selectedJobId: string | null;
 }
@@ -24,13 +23,11 @@ const jobCardBtn = 'w-full text-left px-3 py-2 rounded-lg border transition-all'
 const jobCardSelected = 'border-cyan-500/40 bg-cyan-500/5';
 const jobCardDefault = 'border-gray-700/50 hover:border-gray-600 bg-gray-800/30';
 
-interface JobCardProps {
+function JobCard({ job, selected, onSelect }: {
   job: JobInfo;
   selected: boolean;
   onSelect: (job: JobInfo) => void;
-}
-
-function JobCard({ job, selected, onSelect }: JobCardProps) {
+}) {
   return (
     <button
       onClick={() => onSelect(job)}
@@ -60,23 +57,7 @@ function JobCard({ job, selected, onSelect }: JobCardProps) {
   );
 }
 
-export default function JobList({ refreshTrigger, onSelectJob, selectedJobId }: Props) {
-  const [jobs, setJobs] = useState<JobInfo[]>([]);
-
-  const fetchJobs = useCallback(async () => {
-    try {
-      const data = await getJobs();
-      setJobs(data);
-    } catch { /* server not ready */ }
-  }, []);
-
-  // Poll every 2s while any job is running
-  useEffect(() => {
-    fetchJobs();
-    const interval = setInterval(fetchJobs, 2000);
-    return () => clearInterval(interval);
-  }, [fetchJobs, refreshTrigger]);
-
+export default function JobList({ jobs, onSelectJob, selectedJobId }: Props) {
   if (jobs.length === 0) {
     return (
       <div className="text-center py-8 text-gray-600 text-sm italic">

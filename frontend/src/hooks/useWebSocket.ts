@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { JobInfo } from '../api';
 
 export interface LogEntry {
   job_id: string;
@@ -6,9 +7,12 @@ export interface LogEntry {
   timestamp: number;
 }
 
+const MAX_JOBS = 20;
+
 export function useWebSocket(url: string) {
   const [connected, setConnected] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [jobs, setJobs] = useState<JobInfo[]>([]);
   const [lastMessage, setLastMessage] = useState<any>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<number>();
@@ -43,6 +47,12 @@ export function useWebSocket(url: string) {
           }]);
         } else if (data.type === 'spectrum') {
           setLastMessage(data);
+        } else if (data.type === 'job_update') {
+          const job: JobInfo = data.job;
+          setJobs(prev => {
+            const filtered = prev.filter(j => j.id !== job.id);
+            return [job, ...filtered].slice(0, MAX_JOBS);
+          });
         }
       } catch { /* ignore non-JSON */ }
     };
@@ -78,5 +88,5 @@ export function useWebSocket(url: string) {
 
   const clearLogs = useCallback(() => setLogs([]), []);
 
-  return { connected, logs, clearLogs, lastMessage };
+  return { connected, logs, clearLogs, lastMessage, jobs };
 }

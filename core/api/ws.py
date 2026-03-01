@@ -48,6 +48,16 @@ def log_callback(job_id: str, message: str) -> None:
     )
 
 
+def job_status_callback(job_dict: dict) -> None:
+    """Thread-safe callback to push job status updates via WebSocket."""
+    if not (_loop and _loop.is_running()):
+        return
+    payload = json.dumps({"type": "job_update", "job": job_dict})
+    asyncio.run_coroutine_threadsafe(
+        _broadcast(_ws_clients, lambda ws: ws.send_text(payload)), _loop,
+    )
+
+
 def audio_callback(data: bytes) -> None:
     """Thread-safe callback to send binary audio PCM via WebSocket."""
     if not (_loop and _loop.is_running()):
