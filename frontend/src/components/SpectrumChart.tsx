@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 
@@ -11,8 +11,6 @@ export interface SpectrumFrame {
 interface Props {
   frame: SpectrumFrame | null;
   mode: 'live' | 'scan';
-  width?: number;
-  height?: number;
   onPeakClick?: (freq_mhz: number) => void;
 }
 
@@ -119,6 +117,38 @@ function wheelZoomPlugin(
           u.setScale('x', { min: nxMin, max: nxMax });
         });
 
+        over.addEventListener('mousedown', (e: MouseEvent) => {
+          if (e.button !== 0) return;
+          const fr = fullRangeRef.current;
+          if (!fr) return;
+          const fullW = fr.xMax - fr.xMin;
+          const curW = u.scales.x.max! - u.scales.x.min!;
+          if (curW >= fullW * 0.99) return; // not zoomed, skip drag
+
+          e.preventDefault();
+          over.style.cursor = 'grabbing';
+          const xUnitsPerPx = u.posToVal(1, 'x') - u.posToVal(0, 'x');
+          const startX = e.clientX;
+          const startMin = u.scales.x.min!;
+          const startMax = u.scales.x.max!;
+
+          const onMove = (e: MouseEvent) => {
+            const dx = xUnitsPerPx * (e.clientX - startX);
+            let nMin = startMin - dx;
+            let nMax = startMax - dx;
+            if (nMin < fr.xMin) { nMin = fr.xMin; nMax = fr.xMin + curW; }
+            if (nMax > fr.xMax) { nMax = fr.xMax; nMin = fr.xMax - curW; }
+            u.setScale('x', { min: nMin, max: nMax });
+          };
+          const onUp = () => {
+            over.style.cursor = 'crosshair';
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+          };
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+        });
+
         over.addEventListener('dblclick', () => {
           const fr = fullRangeRef.current;
           if (fr) u.setScale('x', { min: fr.xMin, max: fr.xMax });
@@ -180,27 +210,42 @@ function clickPlugin(
 const TITLE_H = 28;
 
 export default function SpectrumChart({
-  frame, mode, width = 900, height = 400, onPeakClick,
+  frame, mode, onPeakClick,
 }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<uPlot | null>(null);
   const peaksRef = useRef<SpectrumFrame['peaks']>([]);
   const maxHoldRef = useRef<number[] | null>(null);
   const fullRangeRef = useRef<{ xMin: number; xMax: number } | null>(null);
-  const prevRangeRef = useRef<string>('');
   const onPeakClickRef = useRef(onPeakClick);
   onPeakClickRef.current = onPeakClick;
+  const [size, setSize] = useState<{ w: number; h: number }>({ w: 400, h: 300 });
 
-  const chartH = height - TITLE_H;
-
-  // Create / recreate chart when mode or dimensions change
+  // Measure container
   useEffect(() => {
-    if (!containerRef.current) return;
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect;
+      if (width > 0 && height > 0) setSize({ w: Math.floor(width), h: Math.floor(height) - TITLE_H });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Resize existing chart (no destroy/recreate)
+  useEffect(() => {
+    chartRef.current?.setSize({ width: size.w, height: size.h });
+  }, [size]);
+
+  // Create / recreate chart when mode changes
+  useEffect(() => {
+    if (!chartContainerRef.current) return;
 
     chartRef.current?.destroy();
     chartRef.current = null;
     maxHoldRef.current = null;
-    prevRangeRef.current = '';
 
     const series: uPlot.Series[] = [
       {},
@@ -223,8 +268,8 @@ export default function SpectrumChart({
     const labelFont = '11px sans-serif';
 
     const opts: uPlot.Options = {
-      width,
-      height: chartH,
+      width: size.w,
+      height: size.h,
       pxAlign: 0,
       scales: {
         x: { time: false },
@@ -275,13 +320,13 @@ export default function SpectrumChart({
       ? [[], [], []]
       : [[], []];
 
-    chartRef.current = new uPlot(opts, empty, containerRef.current);
+    chartRef.current = new uPlot(opts, empty, chartContainerRef.current);
 
     return () => {
       chartRef.current?.destroy();
       chartRef.current = null;
     };
-  }, [mode, width, chartH]);
+  }, [mode]);
 
   // Push data on each frame
   useEffect(() => {
@@ -296,10 +341,14 @@ export default function SpectrumChart({
       xMax: freqs_mhz[freqs_mhz.length - 1],
     };
 
-    const rangeKey = `${freqs_mhz[0]}:${freqs_mhz[freqs_mhz.length - 1]}`;
-    const rangeChanged = prevRangeRef.current !== rangeKey;
-    prevRangeRef.current = rangeKey;
+    // Capture zoom state before setData resets scales
+    const fr = fullRangeRef.current;
+    const xZoomMin = chart.scales.x.min;
+    const xZoomMax = chart.scales.x.max;
+    const isZoomed = fr && xZoomMin != null && xZoomMax != null
+      && (xZoomMax - xZoomMin) < (fr.xMax - fr.xMin) * 0.99;
 
+    let data: uPlot.AlignedData;
     if (mode === 'live') {
       if (!maxHoldRef.current || maxHoldRef.current.length !== power_db.length) {
         maxHoldRef.current = [...power_db];
@@ -312,13 +361,18 @@ export default function SpectrumChart({
           }
         }
       }
-      chart.setData(
-        [freqs_mhz, power_db, [...maxHoldRef.current]],
-        rangeChanged,
-      );
+      data = [freqs_mhz, power_db, [...maxHoldRef.current]];
     } else {
-      chart.setData([freqs_mhz, power_db], rangeChanged);
+      data = [freqs_mhz, power_db];
     }
+
+    // Always reset scales (so y auto-ranges), then restore x zoom
+    chart.batch(() => {
+      chart.setData(data, true);
+      if (isZoomed) {
+        chart.setScale('x', { min: xZoomMin!, max: xZoomMax! });
+      }
+    });
   }, [frame, mode]);
 
   // Reset max hold when freq range changes
@@ -331,8 +385,8 @@ export default function SpectrumChart({
   const peakCount = frame?.peaks?.length ?? 0;
 
   return (
-    <div style={{ width, height }}>
-      <div className="flex items-center justify-center gap-2" style={{ height: TITLE_H }}>
+    <div ref={wrapRef} className="w-full h-full flex flex-col">
+      <div className="flex items-center justify-center gap-2 flex-shrink-0" style={{ height: TITLE_H }}>
         {mode === 'live' && (
           <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
         )}
@@ -347,7 +401,7 @@ export default function SpectrumChart({
         )}
         <span className="text-[10px] text-gray-600 ml-2">scroll to zoom · double-click to reset</span>
       </div>
-      <div ref={containerRef} className="rounded-lg overflow-hidden" />
+      <div ref={chartContainerRef} className="flex-1 overflow-hidden rounded-lg" />
     </div>
   );
 }

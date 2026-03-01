@@ -82,7 +82,7 @@ function ScanResult({ job }: { job: JobInfo }) {
     peaks: job.params.peaks ?? [],
   };
 
-  return <SpectrumChart frame={frame} mode="scan" width={900} height={400} />;
+  return <SpectrumChart frame={frame} mode="scan" />;
 }
 
 function WaterfallResult({ job }: { job: JobInfo }) {

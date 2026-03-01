@@ -90,10 +90,10 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
   onClear: () => void;
 }) {
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 min-w-0 flex flex-col">
       <div className="flex-1 border-b border-gray-800 flex items-center justify-center overflow-hidden">
         {liveActive || liveFrame ? (
-          <SpectrumChart frame={liveFrame} mode="live" width={900} height={400} />
+          <SpectrumChart frame={liveFrame} mode="live" />
         ) : (
           <ResultView job={selectedJob} />
         )}
