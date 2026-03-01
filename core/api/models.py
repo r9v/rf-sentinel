@@ -18,15 +18,7 @@ class JobStatus(str, Enum):
 
 
 class ScanRequest(BaseModel):
-    """Request to start a PSD scan over a frequency range."""
-    start_mhz: float = Field(97.0, ge=24.0, le=1766.0, description="Start frequency in MHz")
-    stop_mhz: float = Field(99.0, ge=24.0, le=1766.0, description="Stop frequency in MHz")
-    duration: float = Field(2.0, ge=0.1, le=30.0, description="Capture duration per chunk in seconds")
-    gain: float = Field(30.0, ge=0.0, le=50.0, description="SDR gain in dB")
-
-
-class WaterfallRequest(BaseModel):
-    """Request to start a waterfall capture (single chunk)."""
+    """Request to start a spectrum + waterfall scan over a frequency range."""
     start_mhz: float = Field(97.0, ge=24.0, le=1766.0)
     stop_mhz: float = Field(99.0, ge=24.0, le=1766.0)
     duration: float = Field(5.0, ge=0.5, le=30.0)

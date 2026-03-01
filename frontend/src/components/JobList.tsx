@@ -15,7 +15,6 @@ const STATUS_STYLE: Record<string, string> = {
 
 const TYPE_ICON: Record<string, string> = {
   scan: '📊',
-  waterfall: '🌊',
 };
 
 const jobCardBtn = 'w-full text-left px-3 py-2 rounded-lg border transition-all';

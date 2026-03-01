@@ -75,19 +75,6 @@ function JobHeader({ job }: { job: JobInfo }) {
 }
 
 function ScanResult({ job }: { job: JobInfo }) {
-  const sd = job.params.spectrum_data;
-  if (!sd) return <p className="text-gray-500 text-sm">No spectrum data available</p>;
-
-  const frame = {
-    freqs_mhz: sd.freqs_mhz,
-    power_db: sd.power_db,
-    peaks: job.params.peaks ?? [],
-  };
-
-  return <SpectrumChart frame={frame} mode="scan" />;
-}
-
-function WaterfallResult({ job }: { job: JobInfo }) {
   const [chartView, setChartView] = useState<ChartView | null>(null);
   const [dataDbRange, setDataDbRange] = useState<[number, number]>([-120, -20]);
   const [dbRange, setDbRange] = useState<[number, number] | null>(null);
@@ -148,7 +135,7 @@ export default function ResultView({ job }: Props) {
     <div className="flex flex-col h-full">
       <JobHeader job={job} />
       <div className="flex-1 min-h-0">
-        {job.type === 'scan' ? <ScanResult job={job} /> : <WaterfallResult job={job} />}
+        <ScanResult job={job} />
       </div>
     </div>
   );

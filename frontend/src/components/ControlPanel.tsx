@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { startScan, startWaterfall, startLive, retuneLive, stopLive, toggleAudio } from '../api';
+import { startScan, startLive, retuneLive, stopLive, toggleAudio } from '../api';
 import ModeSelector, { Mode } from './ModeSelector';
 import PresetBar from './PresetBar';
 import ParamSlider from './ParamSlider';
@@ -133,11 +133,7 @@ export default function ControlPanel({ liveActive, onLiveToggle, audioEnabled, o
         duration,
         gain,
       };
-      if (mode === 'scan') {
-        await startScan(params);
-      } else {
-        await startWaterfall(params);
-      }
+      await startScan(params);
     } catch (e) {
       console.error('Failed to start job:', e);
     } finally {

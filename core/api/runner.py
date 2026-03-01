@@ -118,13 +118,6 @@ class JobRunner:
             "duration": duration, "gain": gain,
         }, self._run_scan)
 
-    def submit_waterfall(self, start_mhz: float, stop_mhz: float,
-                         duration: float, gain: float) -> Job:
-        return self._submit_job("waterfall", {
-            "start_mhz": start_mhz, "stop_mhz": stop_mhz,
-            "duration": duration, "gain": gain,
-        }, self._run_waterfall)
-
     # ── Shared helpers ──────────────────────────────────
 
     def _capture_segments(self, job: Job, label: str, compute_fn, trim_fn):
@@ -188,55 +181,15 @@ class JobRunner:
         job.status = JobStatus.RUNNING
         _emit_job_status(job)
         t0 = time.time()
-        p = job.params
-
-        try:
-            from core.dsp import compute_psd, trim_spectrum, stitch_spectra, find_peaks
-
-            segments, num_chunks = self._capture_segments(job, "Scan", compute_psd, trim_spectrum)
-
-            _emit(job.id, "Stitching spectrum..." if num_chunks > 1 else "Processing...")
-            result = stitch_spectra(segments)
-
-            _emit(job.id, "Detecting signals...")
-            peaks = find_peaks(result.freqs_mhz, result.power_db)
-            self._log_peaks(job.id, peaks)
-
-            step = max(1, len(result.freqs_mhz) // 2048)
-            job.params["spectrum_data"] = {
-                "freqs_mhz": result.freqs_mhz[::step].tolist(),
-                "power_db": result.power_db[::step].tolist(),
-            }
-
-            self._finalize_job(job, t0, None, peaks)
-            _emit(job.id, f"Scan complete ({job.duration_s}s)")
-
-        except Exception as e:
-            job.status = JobStatus.ERROR
-            job.error = str(e)
-            job.duration_s = round(time.time() - t0, 2)
-            _emit_job_status(job)
-            _emit(job.id, f"ERROR: {e}")
-            logger.error(traceback.format_exc())
-        finally:
-            gc.collect()
-
-    # ── Waterfall (stitched) ────────────────────────────
-
-    def _run_waterfall(self, job: Job) -> None:
-        job.status = JobStatus.RUNNING
-        _emit_job_status(job)
-        t0 = time.time()
-        p = job.params
 
         try:
             from core.dsp import compute_waterfall, trim_waterfall, stitch_waterfalls, find_peaks
 
-            segments, num_chunks = self._capture_segments(job, "Waterfall", compute_waterfall, trim_waterfall)
+            segments, num_chunks = self._capture_segments(job, "Scan", compute_waterfall, trim_waterfall)
             if num_chunks > 1:
                 _emit(job.id, "  Note: chunks captured sequentially, not simultaneously")
 
-            _emit(job.id, "Stitching waterfall..." if num_chunks > 1 else "Processing...")
+            _emit(job.id, "Stitching spectrum..." if num_chunks > 1 else "Processing...")
             result = stitch_waterfalls(segments)
 
             _emit(job.id, "Detecting signals...")
@@ -258,7 +211,7 @@ class JobRunner:
             }
 
             self._finalize_job(job, t0, None, peaks)
-            _emit(job.id, f"Waterfall complete ({job.duration_s}s)")
+            _emit(job.id, f"Scan complete ({job.duration_s}s)")
 
         except Exception as e:
             job.status = JobStatus.ERROR

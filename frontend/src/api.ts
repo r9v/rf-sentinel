@@ -37,12 +37,6 @@ export async function startScan(params: {
   return (await post('/api/scan', params)).json();
 }
 
-export async function startWaterfall(params: {
-  start_mhz: number; stop_mhz: number; duration: number; gain: number;
-}): Promise<JobResponse> {
-  return (await post('/api/waterfall', params)).json();
-}
-
 // ── Live mode ──────────────────────────────────────────
 
 export async function startLive(params: {

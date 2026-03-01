@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from core.api.models import ScanRequest, WaterfallRequest, LiveRequest, RetuneRequest, AudioToggleRequest, VfoRequest
+from core.api.models import ScanRequest, LiveRequest, RetuneRequest, AudioToggleRequest, VfoRequest
 from core.api.runner import JobRunner
 
 
@@ -19,11 +19,6 @@ def create_routes(runner: JobRunner) -> APIRouter:
     @router.post("/api/scan")
     async def start_scan(req: ScanRequest):
         job = runner.submit_scan(req.start_mhz, req.stop_mhz, req.duration, req.gain)
-        return {"job_id": job.id, "status": job.status.value}
-
-    @router.post("/api/waterfall")
-    async def start_waterfall(req: WaterfallRequest):
-        job = runner.submit_waterfall(req.start_mhz, req.stop_mhz, req.duration, req.gain)
         return {"job_id": job.id, "status": job.status.value}
 
     @router.post("/api/live/start")
