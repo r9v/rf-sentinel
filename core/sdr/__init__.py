@@ -33,10 +33,6 @@ class CaptureResult:
     actual_duration: float  # seconds
     num_samples: int
 
-    @property
-    def freq_mhz(self) -> float:
-        return self.config.center_freq / 1e6
-
 
 class SDRDevice:
     """Wrapper around RTL-SDR with resource management."""
@@ -66,43 +62,44 @@ class SDRDevice:
     def _config_key(self, config: CaptureConfig) -> tuple:
         return (config.sample_rate, config.center_freq, config.gain)
 
-    def capture(self, config: CaptureConfig) -> CaptureResult:
-        """Capture I/Q samples based on config.
-
-        Skips reconfiguration and PLL settling when config unchanged
-        (for fast repeated captures in live mode). On first call or
-        config change, applies full setup with PLL discard.
-        """
+    def _apply_config(self, config: CaptureConfig) -> None:
+        """Apply device settings + PLL settle if config changed. No-op otherwise."""
         if self._sdr is None:
             raise RuntimeError("Device not open. Use 'with SDRDevice() as sdr:'")
 
         config_key = self._config_key(config)
-        need_reconfig = config_key != self._last_config_key
+        if config_key == self._last_config_key:
+            return
 
-        if need_reconfig:
-            log.debug("SDR reconfig: sr=%.0f fc=%.0f gain=%.0f",
-                      config.sample_rate, config.center_freq, config.gain)
-            self._sdr.sample_rate = config.sample_rate
-            self._sdr.center_freq = config.center_freq
-            self._sdr.gain = config.gain
+        log.debug("SDR reconfig: sr=%.0f fc=%.0f gain=%.0f",
+                  config.sample_rate, config.center_freq, config.gain)
+        self._sdr.sample_rate = config.sample_rate
+        self._sdr.center_freq = config.center_freq
+        self._sdr.gain = config.gain
+
+        try:
+            self._sdr.read_samples(256 * 1024)
+        except Exception as exc:
+            self._last_config_key = None
+            raise RuntimeError(
+                f"USB read failed on settle chunk (freq={config.center_freq/1e6:.1f} MHz, "
+                f"rate={config.sample_rate/1e6:.1f} MHz). "
+                "Device may need a replug."
+            ) from exc
+        self._last_config_key = config_key
+
+    def capture(self, config: CaptureConfig) -> CaptureResult:
+        """Capture I/Q samples based on config.
+
+        Skips reconfiguration and PLL settling when config unchanged.
+        """
+        self._apply_config(config)
 
         num_samples = int(config.sample_rate * config.duration)
         if num_samples > config.max_samples:
             num_samples = config.max_samples
 
         actual_duration = num_samples / config.sample_rate
-
-        if need_reconfig:
-            try:
-                self._sdr.read_samples(256 * 1024)
-            except Exception as exc:
-                self._last_config_key = None
-                raise RuntimeError(
-                    f"USB read failed on settle chunk (freq={config.center_freq/1e6:.1f} MHz, "
-                    f"rate={config.sample_rate/1e6:.1f} MHz). "
-                    "Device may need a replug."
-                ) from exc
-            self._last_config_key = config_key
 
         # Read in chunks to avoid memory spikes
         chunk_size = 256 * 1024
@@ -148,29 +145,7 @@ class SDRDevice:
 
         Used before start_stream() to set up the device.
         """
-        if self._sdr is None:
-            raise RuntimeError("Device not open. Use 'with SDRDevice() as sdr:'")
-
-        config_key = self._config_key(config)
-        if config_key == self._last_config_key:
-            return
-
-        log.debug("SDR configure: sr=%.0f fc=%.0f gain=%.0f",
-                  config.sample_rate, config.center_freq, config.gain)
-        self._sdr.sample_rate = config.sample_rate
-        self._sdr.center_freq = config.center_freq
-        self._sdr.gain = config.gain
-
-        try:
-            self._sdr.read_samples(256 * 1024)  # PLL settle
-        except Exception as exc:
-            self._last_config_key = None
-            raise RuntimeError(
-                f"USB read failed on settle chunk (freq={config.center_freq/1e6:.1f} MHz, "
-                f"rate={config.sample_rate/1e6:.1f} MHz). "
-                "Device may need a replug."
-            ) from exc
-        self._last_config_key = config_key
+        self._apply_config(config)
 
     def start_stream(self, callback: Callable[[np.ndarray], None],
                      num_samples: int) -> None:
