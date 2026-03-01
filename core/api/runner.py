@@ -139,18 +139,18 @@ class JobRunner:
               f"({num_chunks} chunk{'s' if num_chunks > 1 else ''})")
 
         segments = []
-        for i, fc in enumerate(centers):
-            _emit(job.id, f"  [{i+1}/{num_chunks}] Capturing {fc/1e6:.1f} MHz...")
-            config = CaptureConfig(
-                center_freq=fc, sample_rate=SAMPLE_RATE,
-                duration=p["duration"], gain=p["gain"],
-            )
-            with SDRDevice() as sdr:
+        with SDRDevice() as sdr:
+            for i, fc in enumerate(centers):
+                _emit(job.id, f"  [{i+1}/{num_chunks}] Capturing {fc/1e6:.1f} MHz...")
+                config = CaptureConfig(
+                    center_freq=fc, sample_rate=SAMPLE_RATE,
+                    duration=p["duration"], gain=p["gain"],
+                )
                 capture = sdr.capture(config)
-            data = compute_fn(capture)
-            if num_chunks > 1:
-                data = trim_fn(data)
-            segments.append(data)
+                data = compute_fn(capture)
+                if num_chunks > 1:
+                    data = trim_fn(data)
+                segments.append(data)
 
         return segments, num_chunks
 
