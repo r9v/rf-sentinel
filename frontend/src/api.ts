@@ -25,7 +25,6 @@ export interface JobInfo {
   type: string;
   status: 'pending' | 'running' | 'complete' | 'error';
   params: Record<string, any>;
-  result_url: string | null;
   error: string | null;
   created_at: string;
   duration_s: number | null;

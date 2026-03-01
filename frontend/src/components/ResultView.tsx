@@ -60,16 +60,6 @@ function JobHeader({ job }: { job: JobInfo }) {
           <span className="text-xs text-gray-500">{job.duration_s}s</span>
         )}
       </div>
-      {job.result_url && (
-        <a
-          href={job.result_url}
-          target="_blank"
-          rel="noopener"
-          className="text-xs text-gray-500 hover:text-cyan-400 transition-colors"
-        >
-          Open full size ↗
-        </a>
-      )}
     </div>
   );
 }

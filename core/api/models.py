@@ -58,7 +58,6 @@ class JobInfo(BaseModel):
     type: str
     status: JobStatus
     params: dict
-    result_url: Optional[str] = None
     error: Optional[str] = None
     created_at: str
     duration_s: Optional[float] = None

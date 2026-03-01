@@ -13,11 +13,10 @@ logging.basicConfig(
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from core.api import ws
 from core.api.routes import create_routes
-from core.api.runner import JobRunner, set_log_callback, set_audio_callback, set_job_status_callback, PLOTS_DIR
+from core.api.runner import JobRunner, set_log_callback, set_audio_callback, set_job_status_callback
 
 logger = logging.getLogger("rfsentinel.server")
 
@@ -40,7 +39,6 @@ runner = JobRunner()
 
 app.include_router(ws.router)
 app.include_router(create_routes(runner))
-app.mount("/api/plots", StaticFiles(directory=str(PLOTS_DIR)), name="plots")
 
 
 @app.on_event("startup")

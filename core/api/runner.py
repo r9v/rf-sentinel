@@ -9,7 +9,6 @@ import logging
 import threading
 import traceback
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Callable, Optional
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
@@ -20,10 +19,6 @@ import numpy as np
 
 logger = logging.getLogger("rfsentinel.runner")
 
-# Output directory for plots
-PLOTS_DIR = Path(__file__).resolve().parent.parent.parent / "plots"
-PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-
 
 @dataclass
 class Job:
@@ -32,7 +27,6 @@ class Job:
     status: JobStatus
     params: dict
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    result_path: Optional[Path] = None
     error: Optional[str] = None
     duration_s: Optional[float] = None
 
@@ -79,7 +73,6 @@ def _emit_job_status(job: "Job") -> None:
             "type": job.type,
             "status": job.status.value,
             "params": job.params,
-            "result_url": f"/api/plots/{job.result_path.name}" if job.result_path else None,
             "error": job.error,
             "created_at": job.created_at.isoformat(),
             "duration_s": job.duration_s,
@@ -168,8 +161,7 @@ class JobRunner:
             for pk in peaks
         ]
 
-    def _finalize_job(self, job: Job, t0: float, plot_path: Optional[Path], peaks) -> None:
-        job.result_path = plot_path
+    def _finalize_job(self, job: Job, t0: float, peaks) -> None:
         job.status = JobStatus.COMPLETE
         job.duration_s = round(time.time() - t0, 2)
         job.params["peaks"] = self._serialize_peaks(peaks)
@@ -210,7 +202,7 @@ class JobRunner:
                 "power_db": np.round(result.mean_psd_db[::freq_step], 1).tolist(),
             }
 
-            self._finalize_job(job, t0, None, peaks)
+            self._finalize_job(job, t0, peaks)
             _emit(job.id, f"Scan complete ({job.duration_s}s)")
 
         except Exception as e:
