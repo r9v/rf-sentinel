@@ -28,48 +28,28 @@ npm run dev
 - **Python:** 3.10+
 - **Node.js:** 18+ (for frontend)
 
-## Project Structure
+## Features
 
-```
-rf-sentinel/
-├── core/                   Python package
-│   ├── __init__.py         Package root, version string
-│   ├── cli.py              CLI interface (scan, waterfall, sweep commands)
-│   ├── plotting.py         Matplotlib rendering + BANDS frequency presets
-│   ├── sdr/                SDR hardware interface
-│   │   └── __init__.py     SDRDevice wrapper, CaptureConfig, CaptureResult
-│   ├── dsp/                Digital signal processing
-│   │   └── __init__.py     PSD (Welch method), spectrogram/waterfall generation
-│   └── api/                FastAPI backend for the web dashboard
-│       ├── models.py       Pydantic request/response schemas
-│       ├── runner.py       Background job executor
-│       └── server.py       REST + WebSocket server, log streaming
-├── frontend/               React + Vite + Tailwind dashboard
-│   └── src/
-│       ├── App.tsx          Main layout
-│       ├── api.ts           API client
-│       ├── hooks/           WebSocket hook for live log streaming
-│       └── components/      ControlPanel, LogConsole, JobList, ResultView
-├── pyproject.toml
-├── requirements.txt
-└── README.md
-```
+### Scan
 
-### Core Modules
+Single-shot power spectral density capture across a frequency range. Uses Welch's method to compute power (dB) vs frequency (MHz). Results render as an interactive chart with peak detection markers and configurable x/y axis ranges.
 
-**`core/sdr/`** — SDR hardware interface. `SDRDevice` is a context manager wrapping `pyrtlsdr`. Handles device configuration, PLL settling (discards first chunk), and memory-safe chunked I/Q capture. `CaptureConfig` and `CaptureResult` dataclasses carry parameters and samples.
+### Waterfall
 
-**`core/dsp/`** — Signal processing. `compute_psd` runs Welch's method for power spectral density (frequency vs power). `compute_waterfall` generates spectrograms (frequency vs time vs power). Both return typed result objects with frequencies in MHz and power in dB.
+Spectrogram capture showing frequency vs time vs power. Produces a heatmap image where the x-axis is frequency, y-axis is time, and color intensity represents signal power. Useful for spotting intermittent or hopping signals.
 
-**`core/plotting.py`** — Matplotlib rendering for spectrum and waterfall plots. Defines the `BANDS` dictionary with predefined frequency presets: FM Radio, Airband, PMR446, 433 MHz IoT, 868 MHz LoRa, GSM 900, and ADS-B.
+### Live Mode
 
-**`core/cli.py`** — Command-line interface with three commands: `scan` (single-band PSD), `waterfall` (spectrogram), and `sweep` (all bands sequentially).
+Continuous real-time spectrum display. The SDR streams I/Q samples and the frontend renders a live-updating power spectrum with:
+- Max-hold trace (decaying peak envelope)
+- Click-to-tune VFO marker with draggable repositioning
+- Drag-to-pan and scroll-to-zoom on the frequency axis
+- Dual-thumb range sliders for both axes
+- dB range markers showing min/max power over a 30-second sliding window
 
-**`core/api/`** — FastAPI backend powering the web dashboard. REST endpoints to launch scan/waterfall jobs, WebSocket endpoint for real-time log streaming, background thread pool for job execution (one at a time — single SDR dongle).
+### Audio Demodulation
 
-### Data Flow
-
-Frontend clicks **Run** → `POST /api/scan` → runner queues a `Job` → background thread calls `sdr` → `dsp` processes samples → dark-themed plot rendered to PNG → job marked complete → frontend polls `/api/jobs` and displays the image. Logs stream live via WebSocket throughout.
+When live mode is active, click a frequency to tune the VFO and enable audio output. Supports FM demodulation streamed over a dedicated WebSocket as PCM audio, played back in the browser via the Web Audio API with adjustable volume.
 
 ## License
 
