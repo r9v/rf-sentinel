@@ -226,13 +226,16 @@ function wheelZoomPlugin(
 const hThumb = 'absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-cyan-400 cursor-ew-resize hover:bg-cyan-300 z-10';
 const vThumb = 'absolute left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-cyan-400 cursor-ns-resize hover:bg-cyan-300 z-10';
 
-function DualRangeSlider({ lo, hi, min, max, onChange, onReset, vertical, snapStep = 0.1, precision = 1 }: {
+interface SliderMarker { pos: number; color: string }
+
+function DualRangeSlider({ lo, hi, min, max, onChange, onReset, vertical, snapStep = 0.1, precision = 1, markers }: {
   lo: number; hi: number; min: number; max: number;
   onChange: (lo: number, hi: number) => void;
   onReset: () => void;
   vertical?: boolean;
   snapStep?: number;
   precision?: number;
+  markers?: SliderMarker[];
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const valToFrac = (v: number) => max > min ? (v - min) / (max - min) : 0;
@@ -299,23 +302,23 @@ function DualRangeSlider({ lo, hi, min, max, onChange, onReset, vertical, snapSt
   const loFrac = valToFrac(lo) * 100;
   const hiFrac = valToFrac(hi) * 100;
   return (
-    <div className="flex items-center gap-2 w-full px-1">
-      <span className="text-[10px] text-gray-500 font-mono w-14 flex-shrink-0">{lo.toFixed(precision)}</span>
-      <div ref={trackRef} className="relative w-full h-3 flex items-center" onDoubleClick={onReset}>
-        <div className="absolute inset-x-0 h-1 rounded-full bg-gray-700" />
-        <div
-          className="absolute h-1 rounded-full bg-cyan-600/50 cursor-grab active:cursor-grabbing"
-          style={{ left: `${loFrac}%`, right: `${100 - hiFrac}%` }}
-          onMouseDown={e => startDrag('pan', e)}
-        />
-        <div className={hThumb} style={{ left: `${loFrac}%` }}
-          onMouseDown={e => startDrag('lo', e)} />
-        <div className={hThumb} style={{ left: `${hiFrac}%` }}
-          onMouseDown={e => startDrag('hi', e)} />
-      </div>
-      <span className="text-[10px] text-gray-500 font-mono w-14 flex-shrink-0 text-right">{hi.toFixed(precision)}</span>
-      <button onClick={onReset}
-        className="text-[10px] text-gray-500 hover:text-cyan-400 transition-colors flex-shrink-0">⟲</button>
+    <div ref={trackRef} className="relative w-full h-3 flex items-center" onDoubleClick={onReset}>
+      <div className="absolute inset-x-0 h-1 rounded-full bg-gray-700" />
+      {markers?.map((m, i) => {
+        const pct = valToFrac(m.pos) * 100;
+        if (pct < 0 || pct > 100) return null;
+        return <div key={i} className="absolute top-0 bottom-0 w-px pointer-events-none"
+          style={{ left: `${pct}%`, backgroundColor: m.color }} />;
+      })}
+      <div
+        className="absolute h-1 rounded-full bg-cyan-600/50 cursor-grab active:cursor-grabbing"
+        style={{ left: `${loFrac}%`, right: `${100 - hiFrac}%` }}
+        onMouseDown={e => startDrag('pan', e)}
+      />
+      <div className={hThumb} style={{ left: `${loFrac}%` }}
+        onMouseDown={e => startDrag('lo', e)} />
+      <div className={hThumb} style={{ left: `${hiFrac}%` }}
+        onMouseDown={e => startDrag('hi', e)} />
     </div>
   );
 }
@@ -358,6 +361,15 @@ export default function SpectrumChart({
   xStartRef.current = xStart;
   xEndRef.current = xEnd;
   const prevDataRange = useRef('');
+  const [plotPad, setPlotPad] = useState({ left: 0, right: 0 });
+  const syncPlotPad = useCallback(() => {
+    const c = chartRef.current;
+    if (!c) return;
+    const dpr = uPlot.pxRatio;
+    const left = Math.round(c.bbox.left / dpr);
+    const right = Math.round(size.w - (c.bbox.left + c.bbox.width) / dpr);
+    setPlotPad(p => (p.left === left && p.right === right) ? p : { left, right });
+  }, [size.w]);
 
   // Measure container
   useEffect(() => {
@@ -374,7 +386,8 @@ export default function SpectrumChart({
   // Resize existing chart (no destroy/recreate)
   useEffect(() => {
     chartRef.current?.setSize({ width: size.w, height: size.h });
-  }, [size]);
+    syncPlotPad();
+  }, [size, syncPlotPad]);
 
   // Create / recreate chart when mode changes
   useEffect(() => {
@@ -458,6 +471,7 @@ export default function SpectrumChart({
       : [[], []];
 
     chartRef.current = new uPlot(opts, empty, chartContainerRef.current);
+    syncPlotPad();
 
     return () => {
       chartRef.current?.destroy();
@@ -530,6 +544,16 @@ export default function SpectrumChart({
   const fMax = frame?.freqs_mhz?.[frame?.freqs_mhz?.length - 1];
   const peakCount = frame?.peaks?.length ?? 0;
 
+  const xSliderMarkers: SliderMarker[] = [];
+  if (frame?.peaks) {
+    for (const pk of frame.peaks.slice(0, 20)) {
+      xSliderMarkers.push({ pos: pk.freq_mhz, color: PEAK });
+    }
+  }
+  if (vfoFreq != null) {
+    xSliderMarkers.push({ pos: vfoFreq, color: VFO_COLOR });
+  }
+
   return (
     <div ref={wrapRef} className="w-full h-full flex flex-col">
       <div className="flex items-center px-3 flex-shrink-0" style={{ height: TITLE_H }}>
@@ -548,13 +572,16 @@ export default function SpectrumChart({
           )}
         </div>
       </div>
-      <div className="flex-shrink-0" style={{ height: XZOOM_H }}>
-        <DualRangeSlider lo={xStart} hi={xEnd} min={dataXMin} max={dataXMax}
-          onChange={(lo, hi) => { setXStart(lo); setXEnd(hi); }}
-          onReset={() => { setXStart(dataXMin); setXEnd(dataXMax); }} />
-      </div>
       <div className="flex flex-1 min-h-0">
-        <div ref={chartContainerRef} className="flex-1 overflow-hidden rounded-lg" />
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex-shrink-0" style={{ height: XZOOM_H, paddingLeft: plotPad.left, paddingRight: plotPad.right }}>
+            <DualRangeSlider lo={xStart} hi={xEnd} min={dataXMin} max={dataXMax}
+              markers={xSliderMarkers}
+              onChange={(lo, hi) => { setXStart(lo); setXEnd(hi); }}
+              onReset={() => { setXStart(dataXMin); setXEnd(dataXMax); }} />
+          </div>
+          <div ref={chartContainerRef} className="flex-1 overflow-hidden rounded-lg" />
+        </div>
         <div className="flex-shrink-0" style={{ width: YZOOM_W }}>
           <DualRangeSlider lo={yLo} hi={yHi} min={-150} max={0} vertical
             snapStep={1} precision={0}
