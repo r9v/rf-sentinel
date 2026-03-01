@@ -78,7 +78,3 @@ export async function toggleAudio(params: {
   return res.json();
 }
 
-export async function getLiveStatus(): Promise<{ active: boolean; audio_enabled: boolean }> {
-  const res = await fetch(`${API}/api/live/status`);
-  return res.json();
-}

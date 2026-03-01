@@ -23,7 +23,9 @@ function LoadingState({ job }: { job: JobInfo }) {
         <p className="text-sm text-gray-400">
           {job.status === 'pending' ? 'Queued...' : 'Processing...'}
         </p>
-        <p className="text-xs text-gray-600 mt-1 capitalize">{job.type} — {job.params.freq_mhz || 'multi-band'} MHz</p>
+        <p className="text-xs text-gray-600 mt-1 capitalize">
+          {job.type} — {job.params.start_mhz}–{job.params.stop_mhz} MHz
+        </p>
       </div>
     </div>
   );
@@ -53,9 +55,9 @@ export default function ResultView({ job }: Props) {
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700/50">
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-200 capitalize font-medium">{job.type}</span>
-          {job.params.freq_mhz && (
-            <span className="text-xs text-cyan-400 font-mono">{job.params.freq_mhz} MHz</span>
-          )}
+          <span className="text-xs text-cyan-400 font-mono">
+            {job.params.start_mhz}–{job.params.stop_mhz} MHz
+          </span>
           {job.duration_s && (
             <span className="text-xs text-gray-500">{job.duration_s}s</span>
           )}

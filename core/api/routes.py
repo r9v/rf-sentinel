@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from core.api.models import ScanRequest, WaterfallRequest, LiveRequest, AudioToggleRequest, JobInfo
+from core.api.models import ScanRequest, WaterfallRequest, LiveRequest, AudioToggleRequest
 from core.api.runner import JobRunner
 
 
@@ -44,41 +44,5 @@ def create_routes(runner: JobRunner) -> APIRouter:
             return JSONResponse({"error": "Live mode is not active"}, status_code=400)
         runner.toggle_audio(req.enabled, req.demod_mode)
         return {"audio_enabled": req.enabled, "demod_mode": req.demod_mode}
-
-    @router.get("/api/live/status")
-    async def live_status():
-        return {"active": runner.live_active, "audio_enabled": runner.audio_enabled}
-
-    @router.get("/api/jobs")
-    async def list_jobs():
-        return [
-            JobInfo(
-                id=j.id,
-                type=j.type,
-                status=j.status,
-                params=j.params,
-                result_url=f"/api/plots/{j.result_path.name}" if j.result_path else None,
-                error=j.error,
-                created_at=j.created_at.isoformat(),
-                duration_s=j.duration_s,
-            ).model_dump()
-            for j in runner.list_jobs()
-        ]
-
-    @router.get("/api/jobs/{job_id}")
-    async def get_job(job_id: str):
-        job = runner.get_job(job_id)
-        if not job:
-            return JSONResponse({"error": "Job not found"}, status_code=404)
-        return JobInfo(
-            id=job.id,
-            type=job.type,
-            status=job.status,
-            params=job.params,
-            result_url=f"/api/plots/{job.result_path.name}" if job.result_path else None,
-            error=job.error,
-            created_at=job.created_at.isoformat(),
-            duration_s=job.duration_s,
-        ).model_dump()
 
     return router

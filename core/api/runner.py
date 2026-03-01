@@ -123,12 +123,6 @@ class JobRunner:
             "duration": duration, "gain": gain,
         }, self._run_waterfall)
 
-    def get_job(self, job_id: str) -> Optional[Job]:
-        return self.jobs.get(job_id)
-
-    def list_jobs(self, limit: int = 20) -> list[Job]:
-        return sorted(self.jobs.values(), key=lambda j: j.created_at, reverse=True)[:limit]
-
     # ── Shared helpers ──────────────────────────────────
 
     def _capture_segments(self, job: Job, label: str, compute_fn, trim_fn):

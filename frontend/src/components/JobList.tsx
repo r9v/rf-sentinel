@@ -16,7 +16,6 @@ const STATUS_STYLE: Record<string, string> = {
 const TYPE_ICON: Record<string, string> = {
   scan: '📊',
   waterfall: '🌊',
-  sweep: '📡',
 };
 
 const jobCardBtn = 'w-full text-left px-3 py-2 rounded-lg border transition-all';
@@ -37,9 +36,9 @@ function JobCard({ job, selected, onSelect }: {
         <div className="flex items-center gap-2">
           <span className="text-sm">{TYPE_ICON[job.type] || '📦'}</span>
           <span className="text-sm text-gray-200 capitalize">{job.type}</span>
-          {job.type !== 'sweep' && job.params.freq_mhz && (
+          {job.params.start_mhz && job.params.stop_mhz && (
             <span className="text-xs text-gray-500 font-mono">
-              {job.params.freq_mhz} MHz
+              {job.params.start_mhz}–{job.params.stop_mhz} MHz
             </span>
           )}
         </div>
