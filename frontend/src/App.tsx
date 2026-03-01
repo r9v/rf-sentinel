@@ -6,7 +6,8 @@ import ControlPanel from './components/ControlPanel';
 import LogConsole from './components/LogConsole';
 import JobList from './components/JobList';
 import ResultView from './components/ResultView';
-import SpectrumChart, { SpectrumFrame } from './components/SpectrumChart';
+import SpectrumChart, { SpectrumFrame, ChartView } from './components/SpectrumChart';
+import WaterfallCanvas from './components/WaterfallCanvas';
 
 const WS_URL = `ws://${window.location.hostname}:8900/api/ws`;
 const AUDIO_WS_URL = `ws://${window.location.hostname}:8900/api/ws/audio`;
@@ -93,11 +94,20 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
   vfoFreq: number | null;
   onFreqClick: (freq_mhz: number) => void;
 }) {
+  const [chartView, setChartView] = useState<ChartView | null>(null);
+
   return (
     <div className="flex-1 min-w-0 flex flex-col">
-      <div className="flex-1 border-b border-gray-800 overflow-hidden">
+      <div className="flex-1 border-b border-gray-800 overflow-hidden flex flex-col">
         {liveActive || liveFrame ? (
-          <SpectrumChart frame={liveFrame} mode="live" vfoFreq={vfoFreq} onFreqClick={onFreqClick} />
+          <>
+            <div className="flex-[2] min-h-0">
+              <SpectrumChart frame={liveFrame} mode="live" vfoFreq={vfoFreq} onFreqClick={onFreqClick} onViewChange={setChartView} />
+            </div>
+            <div className="flex-1 min-h-0 border-t border-gray-800/50">
+              <WaterfallCanvas frame={liveFrame} view={chartView} />
+            </div>
+          </>
         ) : (
           <ResultView job={selectedJob} />
         )}

@@ -2,6 +2,13 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 
+export interface ChartView {
+  xStart: number;
+  xEnd: number;
+  padLeft: number;
+  padRight: number;
+}
+
 export interface SpectrumFrame {
   freqs_mhz: number[];
   power_db: number[];
@@ -13,6 +20,7 @@ interface Props {
   mode: 'live' | 'scan';
   vfoFreq?: number | null;
   onFreqClick?: (freq_mhz: number) => void;
+  onViewChange?: (view: ChartView) => void;
 }
 
 function useStateRef<T>(init: T): [T, (v: T) => void, React.MutableRefObject<T>] {
@@ -385,7 +393,7 @@ const XZOOM_H = 24;
 const YZOOM_W = 24;
 
 export default function SpectrumChart({
-  frame, mode, vfoFreq, onFreqClick,
+  frame, mode, vfoFreq, onFreqClick, onViewChange,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -604,7 +612,8 @@ export default function SpectrumChart({
 
   useEffect(() => {
     chartRef.current?.setScale('x', { min: xStart, max: xEnd });
-  }, [xStart, xEnd]);
+    onViewChange?.({ xStart, xEnd, padLeft: plotPad.left, padRight: plotPad.right + YZOOM_W });
+  }, [xStart, xEnd, plotPad]);
 
   useEffect(() => {
     chartRef.current?.redraw(false);
