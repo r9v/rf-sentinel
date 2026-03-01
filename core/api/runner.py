@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from core.api.models import JobStatus
 from core.dsp.types import DemodMode
-from core.plotting import render_scan_plot, render_waterfall_plot
+from core.plotting import render_waterfall_plot
 
 logger = logging.getLogger("rfsentinel.runner")
 
@@ -174,7 +174,7 @@ class JobRunner:
             for pk in peaks
         ]
 
-    def _finalize_job(self, job: Job, t0: float, plot_path: Path, peaks) -> None:
+    def _finalize_job(self, job: Job, t0: float, plot_path: Optional[Path], peaks) -> None:
         job.result_path = plot_path
         job.status = JobStatus.COMPLETE
         job.duration_s = round(time.time() - t0, 2)
@@ -201,11 +201,13 @@ class JobRunner:
             peaks = find_peaks(result.freqs_mhz, result.power_db)
             self._log_peaks(job.id, peaks)
 
-            _emit(job.id, "Rendering plot...")
-            plot_path = PLOTS_DIR / f"scan_{job.id}.png"
-            render_scan_plot(result, p, plot_path, peaks)
+            step = max(1, len(result.freqs_mhz) // 2048)
+            job.params["spectrum_data"] = {
+                "freqs_mhz": result.freqs_mhz[::step].tolist(),
+                "power_db": result.power_db[::step].tolist(),
+            }
 
-            self._finalize_job(job, t0, plot_path, peaks)
+            self._finalize_job(job, t0, None, peaks)
             _emit(job.id, f"Scan complete ({job.duration_s}s)")
 
         except Exception as e:

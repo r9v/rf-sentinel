@@ -1,4 +1,5 @@
 import { JobInfo } from '../api';
+import SpectrumChart from './SpectrumChart';
 
 interface Props {
   job: JobInfo | null;
@@ -45,6 +46,56 @@ function ErrorState({ job }: { job: JobInfo }) {
   );
 }
 
+function JobHeader({ job }: { job: JobInfo }) {
+  return (
+    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700/50">
+      <div className="flex items-center gap-3">
+        <span className="text-sm text-gray-200 capitalize font-medium">{job.type}</span>
+        <span className="text-xs text-cyan-400 font-mono">
+          {job.params.start_mhz}–{job.params.stop_mhz} MHz
+        </span>
+        {job.duration_s && (
+          <span className="text-xs text-gray-500">{job.duration_s}s</span>
+        )}
+      </div>
+      {job.result_url && (
+        <a
+          href={job.result_url}
+          target="_blank"
+          rel="noopener"
+          className="text-xs text-gray-500 hover:text-cyan-400 transition-colors"
+        >
+          Open full size ↗
+        </a>
+      )}
+    </div>
+  );
+}
+
+function ScanResult({ job }: { job: JobInfo }) {
+  const sd = job.params.spectrum_data;
+  if (!sd) return <p className="text-gray-500 text-sm">No spectrum data available</p>;
+
+  const frame = {
+    freqs_mhz: sd.freqs_mhz,
+    power_db: sd.power_db,
+    peaks: job.params.peaks ?? [],
+  };
+
+  return <SpectrumChart frame={frame} mode="scan" width={900} height={400} />;
+}
+
+function WaterfallResult({ job }: { job: JobInfo }) {
+  if (!job.result_url) return <p className="text-gray-500 text-sm">No plot available</p>;
+  return (
+    <img
+      src={job.result_url}
+      alt="waterfall result"
+      className="max-w-full max-h-full object-contain rounded"
+    />
+  );
+}
+
 export default function ResultView({ job }: Props) {
   if (!job) return <EmptyState />;
   if (job.status === 'pending' || job.status === 'running') return <LoadingState job={job} />;
@@ -52,37 +103,9 @@ export default function ResultView({ job }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700/50">
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-200 capitalize font-medium">{job.type}</span>
-          <span className="text-xs text-cyan-400 font-mono">
-            {job.params.start_mhz}–{job.params.stop_mhz} MHz
-          </span>
-          {job.duration_s && (
-            <span className="text-xs text-gray-500">{job.duration_s}s</span>
-          )}
-        </div>
-        {job.result_url && (
-          <a
-            href={job.result_url}
-            target="_blank"
-            rel="noopener"
-            className="text-xs text-gray-500 hover:text-cyan-400 transition-colors"
-          >
-            Open full size ↗
-          </a>
-        )}
-      </div>
+      <JobHeader job={job} />
       <div className="flex-1 overflow-auto p-2 flex items-center justify-center">
-        {job.result_url ? (
-          <img
-            src={job.result_url}
-            alt={`${job.type} result`}
-            className="max-w-full max-h-full object-contain rounded"
-          />
-        ) : (
-          <p className="text-gray-500 text-sm">No plot available</p>
-        )}
+        {job.type === 'scan' ? <ScanResult job={job} /> : <WaterfallResult job={job} />}
       </div>
     </div>
   );

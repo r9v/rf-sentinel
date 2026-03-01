@@ -8,6 +8,7 @@ export interface SpectrumFrame {
 
 interface Props {
   frame: SpectrumFrame | null;
+  mode: 'live' | 'scan';
   width?: number;
   height?: number;
 }
@@ -32,7 +33,6 @@ function drawGrid(
   ctx.strokeStyle = GRID_COLOR;
   ctx.lineWidth = 1;
 
-  // Horizontal lines + power labels
   const pStep = Math.max(5, Math.ceil((pMax - pMin) / 8 / 5) * 5);
   ctx.font = '10px monospace';
   ctx.fillStyle = AXIS_COLOR;
@@ -46,7 +46,6 @@ function drawGrid(
     ctx.fillText(`${p}`, ml - 5, y + 3);
   }
 
-  // Vertical lines + freq labels
   const fRange = fMax - fMin;
   const fStepOptions = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10];
   const fStep = fStepOptions.find(s => fRange / s <= 10) ?? 10;
@@ -61,17 +60,18 @@ function drawGrid(
   }
 }
 
-function drawMaxHoldTrace(
+function drawTrace(
   ctx: CanvasRenderingContext2D,
   toX: MapFn, toY: MapFn,
-  freqs: number[], maxHold: number[],
+  freqs: number[], values: number[],
+  stroke: string, lineWidth: number,
 ): void {
   ctx.beginPath();
-  ctx.strokeStyle = 'rgba(255,100,50,0.25)';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = lineWidth;
   for (let i = 0; i < freqs.length; i++) {
     const x = toX(freqs[i]);
-    const y = toY(maxHold[i]);
+    const y = toY(values[i]);
     i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
   }
   ctx.stroke();
@@ -82,7 +82,6 @@ function drawSpectrum(
   toX: MapFn, toY: MapFn,
   freqs: number[], power: number[], pMin: number,
 ): void {
-  // Fill
   ctx.beginPath();
   ctx.moveTo(toX(freqs[0]), toY(pMin));
   for (let i = 0; i < freqs.length; i++) {
@@ -93,16 +92,7 @@ function drawSpectrum(
   ctx.fillStyle = FILL_COLOR;
   ctx.fill();
 
-  // Line
-  ctx.beginPath();
-  ctx.strokeStyle = LINE_COLOR;
-  ctx.lineWidth = 1.5;
-  for (let i = 0; i < freqs.length; i++) {
-    const x = toX(freqs[i]);
-    const y = toY(power[i]);
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  }
-  ctx.stroke();
+  drawTrace(ctx, toX, toY, freqs, power, LINE_COLOR, 1.5);
 }
 
 function drawPeakMarkers(
@@ -126,12 +116,13 @@ function drawPeakMarkers(
   }
 }
 
-function drawAxisLabels(
+function drawTitle(
   ctx: CanvasRenderingContext2D,
-  ml: number, mt: number, pw: number, ph: number,
+  ml: number, mt: number, pw: number,
   width: number, height: number,
   fMin: number, fMax: number,
   peaks: SpectrumFrame['peaks'],
+  mode: 'live' | 'scan',
 ): void {
   ctx.fillStyle = TEXT_COLOR;
   ctx.font = '11px sans-serif';
@@ -139,27 +130,28 @@ function drawAxisLabels(
   ctx.fillText('Frequency [MHz]', ml + pw / 2, height - 3);
 
   ctx.save();
-  ctx.translate(13, mt + ph / 2);
+  ctx.translate(13, mt + (height - mt - 35) / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.fillText('Power [dB]', 0, 0);
   ctx.restore();
 
-  // Title
   ctx.fillStyle = '#e0e0e0';
   ctx.font = 'bold 13px sans-serif';
   ctx.textAlign = 'center';
-  const title = `LIVE — ${fMin.toFixed(1)}–${fMax.toFixed(1)} MHz`;
+  const label = mode === 'live' ? 'LIVE' : 'SCAN';
+  const title = `${label} — ${fMin.toFixed(1)}–${fMax.toFixed(1)} MHz`;
   const peakCount = peaks.length > 0 ? `  (${peaks.length} signal${peaks.length !== 1 ? 's' : ''})` : '';
   ctx.fillText(title + peakCount, ml + pw / 2, 18);
 
-  // Live indicator dot
-  ctx.fillStyle = '#ff3333';
-  ctx.beginPath();
-  ctx.arc(ml + 8, 14, 4, 0, Math.PI * 2);
-  ctx.fill();
+  if (mode === 'live') {
+    ctx.fillStyle = '#ff3333';
+    ctx.beginPath();
+    ctx.arc(ml + 8, 14, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
-export default function LiveSpectrum({ frame, width = 900, height = 320 }: Props) {
+export default function SpectrumChart({ frame, mode, width = 900, height = 320 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const maxHoldRef = useRef<number[] | null>(null);
 
@@ -175,25 +167,25 @@ export default function LiveSpectrum({ frame, width = 900, height = 320 }: Props
     canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
 
-    const freqs = frame.freqs_mhz;
-    const power = frame.power_db;
-    const peaks = frame.peaks;
+    const { freqs_mhz: freqs, power_db: power, peaks } = frame;
 
-    // Update max hold
-    if (!maxHoldRef.current || maxHoldRef.current.length !== power.length) {
-      maxHoldRef.current = [...power];
-    } else {
-      for (let i = 0; i < power.length; i++) {
-        if (power[i] > maxHoldRef.current[i]) {
-          maxHoldRef.current[i] = power[i];
-        } else {
-          maxHoldRef.current[i] -= 0.15; // slow decay
+    // Max hold only in live mode
+    let maxHold: number[] | null = null;
+    if (mode === 'live') {
+      if (!maxHoldRef.current || maxHoldRef.current.length !== power.length) {
+        maxHoldRef.current = [...power];
+      } else {
+        for (let i = 0; i < power.length; i++) {
+          if (power[i] > maxHoldRef.current[i]) {
+            maxHoldRef.current[i] = power[i];
+          } else {
+            maxHoldRef.current[i] -= 0.15;
+          }
         }
       }
+      maxHold = maxHoldRef.current;
     }
-    const maxHold = maxHoldRef.current;
 
-    // Axis ranges
     const fMin = freqs[0];
     const fMax = freqs[freqs.length - 1];
 
@@ -202,8 +194,10 @@ export default function LiveSpectrum({ frame, width = 900, height = 320 }: Props
       if (v < pMin) pMin = v;
       if (v > pMax) pMax = v;
     }
-    for (const v of maxHold) {
-      if (v > pMax) pMax = v;
+    if (maxHold) {
+      for (const v of maxHold) {
+        if (v > pMax) pMax = v;
+      }
     }
     pMin = Math.floor(pMin / 5) * 5 - 5;
     pMax = Math.ceil(pMax / 5) * 5 + 5;
@@ -221,20 +215,16 @@ export default function LiveSpectrum({ frame, width = 900, height = 320 }: Props
     ctx.fillRect(ml, mt, pw, ph);
 
     drawGrid(ctx, toX, toY, fMin, fMax, pMin, pMax, ml, mt, pw, ph);
-    drawMaxHoldTrace(ctx, toX, toY, freqs, maxHold);
+    if (maxHold) drawTrace(ctx, toX, toY, freqs, maxHold, 'rgba(255,100,50,0.25)', 1);
     drawSpectrum(ctx, toX, toY, freqs, power, pMin);
     drawPeakMarkers(ctx, toX, toY, peaks);
-    drawAxisLabels(ctx, ml, mt, pw, ph, width, height, fMin, fMax, peaks);
-  }, [frame, width, height]);
+    drawTitle(ctx, ml, mt, pw, width, height, fMin, fMax, peaks, mode);
+  }, [frame, mode, width, height]);
 
-  useEffect(() => {
-    draw();
-  }, [draw]);
+  useEffect(() => { draw(); }, [draw]);
 
-  // Reset max hold when frequency range changes
-  useEffect(() => {
-    maxHoldRef.current = null;
-  }, [frame?.freqs_mhz?.[0], frame?.freqs_mhz?.[frame?.freqs_mhz?.length - 1]]);
+  useEffect(() => { maxHoldRef.current = null; },
+    [frame?.freqs_mhz?.[0], frame?.freqs_mhz?.[frame?.freqs_mhz?.length - 1]]);
 
   return (
     <canvas

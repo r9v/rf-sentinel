@@ -6,7 +6,7 @@ import ControlPanel from './components/ControlPanel';
 import LogConsole from './components/LogConsole';
 import JobList from './components/JobList';
 import ResultView from './components/ResultView';
-import LiveSpectrum, { SpectrumFrame } from './components/LiveSpectrum';
+import SpectrumChart, { SpectrumFrame } from './components/SpectrumChart';
 
 const WS_URL = `ws://${window.location.hostname}:8900/api/ws`;
 const AUDIO_WS_URL = `ws://${window.location.hostname}:8900/api/ws/audio`;
@@ -93,7 +93,7 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
     <div className="flex-1 flex flex-col">
       <div className="flex-1 border-b border-gray-800 flex items-center justify-center overflow-hidden">
         {liveActive || liveFrame ? (
-          <LiveSpectrum frame={liveFrame} width={900} height={400} />
+          <SpectrumChart frame={liveFrame} mode="live" width={900} height={400} />
         ) : (
           <ResultView job={selectedJob} />
         )}
