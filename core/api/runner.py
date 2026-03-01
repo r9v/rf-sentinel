@@ -73,6 +73,7 @@ class JobRunner:
         self._pool = ThreadPoolExecutor(max_workers=1)
         self._live_active = False
         self._live_thread = None
+        self._live_sdr: object | None = None
         self._audio_enabled = False
         self._demod_mode = DemodMode.FM
         self._demod_state = None
@@ -273,9 +274,12 @@ class JobRunner:
         """Stop continuous spectrum capture."""
         self._live_active = False
         self._audio_enabled = False
+        if self._live_sdr:
+            self._live_sdr.stop_stream()
         if self._live_thread:
             self._live_thread.join(timeout=3)
             self._live_thread = None
+        self._live_sdr = None
         logger.info("live stopped")
         _emit("live", "Live stopped")
 
@@ -349,17 +353,18 @@ class JobRunner:
 
     def _live_loop(self, center_hz: float, sample_rate: float,
                    gain: float, start_mhz: float, stop_mhz: float) -> None:
-        """Continuous capture loop with pipelined processing.
+        """Continuous streaming loop using async USB reads.
 
-        Pipeline: process frame N in a worker thread while capturing frame N+1.
+        Uses rtlsdr_read_async for gapless sample delivery — no USB
+        re-trigger overhead between frames.
         """
-        from core.sdr import SDRDevice, CaptureConfig
+        from core.sdr import SDRDevice, CaptureConfig, CaptureResult
 
-        CAPTURE_DURATION = 0.1    # 100ms — balance between smooth audio and USB overhead
-        SPECTRUM_EVERY = 5        # send spectrum every 5th frame (~500ms)
+        CHUNK_SAMPLES = int(sample_rate * 0.1)  # 100ms per callback
+        SPECTRUM_EVERY = 5
 
-        logger.info("live loop starting: fc=%.3f MHz sr=%.0f Hz gain=%.0f dB chunk=%.0fms",
-                     center_hz / 1e6, sample_rate, gain, CAPTURE_DURATION * 1000)
+        logger.info("live loop starting: fc=%.3f MHz sr=%.0f Hz gain=%.0f dB chunk=%d samples",
+                     center_hz / 1e6, sample_rate, gain, CHUNK_SAMPLES)
 
         frame_count = 0
         try:
@@ -367,31 +372,30 @@ class JobRunner:
                 center_freq=center_hz,
                 sample_rate=sample_rate,
                 gain=gain,
-                duration=CAPTURE_DURATION,
+                duration=0,
             )
 
-            process_thread: threading.Thread | None = None
-
             with SDRDevice() as sdr:
-                logger.info("live loop: SDR device opened (pipelined)")
-                while self._live_active:
-                    capture = sdr.capture(config)
+                self._live_sdr = sdr
+                sdr.configure(config)
+                logger.info("live loop: SDR device opened (streaming)")
 
-                    if process_thread is not None:
-                        process_thread.join()
+                def on_chunk(iq):
+                    nonlocal frame_count
+                    if not self._live_active:
+                        sdr.stop_stream()
+                        return
 
-                    send_spectrum = (frame_count % SPECTRUM_EVERY == 0)
-                    process_thread = threading.Thread(
-                        target=self._process_live_frame,
-                        args=(capture, sample_rate, frame_count, send_spectrum),
-                        daemon=True,
+                    capture = CaptureResult(
+                        samples=iq, config=config,
+                        actual_duration=len(iq) / sample_rate,
+                        num_samples=len(iq),
                     )
-                    process_thread.start()
+                    send_spectrum = (frame_count % SPECTRUM_EVERY == 0)
+                    self._process_live_frame(capture, sample_rate, frame_count, send_spectrum)
                     frame_count += 1
 
-            # Wait for last processing thread before exiting
-            if process_thread is not None:
-                process_thread.join(timeout=2)
+                sdr.start_stream(on_chunk, CHUNK_SAMPLES)
 
         except Exception as e:
             _emit("live", f"Live error: {e}")
@@ -399,5 +403,6 @@ class JobRunner:
         finally:
             self._live_active = False
             self._audio_enabled = False
+            self._live_sdr = None
             logger.info("live loop exited after %d frames", frame_count)
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 import logging
 
@@ -140,3 +140,51 @@ class SDRDevice:
         """Convenience method — capture by frequency in MHz."""
         config = CaptureConfig(center_freq=freq_mhz * 1e6, duration=duration, **kwargs)
         return self.capture(config)
+
+    # ── Continuous streaming (live mode) ─────────────────
+
+    def configure(self, config: CaptureConfig) -> None:
+        """Apply device settings with PLL settle, without reading data.
+
+        Used before start_stream() to set up the device.
+        """
+        if self._sdr is None:
+            raise RuntimeError("Device not open. Use 'with SDRDevice() as sdr:'")
+
+        config_key = self._config_key(config)
+        if config_key == self._last_config_key:
+            return
+
+        log.debug("SDR configure: sr=%.0f fc=%.0f gain=%.0f",
+                  config.sample_rate, config.center_freq, config.gain)
+        self._sdr.sample_rate = config.sample_rate
+        self._sdr.center_freq = config.center_freq
+        self._sdr.gain = config.gain
+
+        try:
+            self._sdr.read_samples(256 * 1024)  # PLL settle
+        except Exception as exc:
+            self._last_config_key = None
+            raise RuntimeError(
+                f"USB read failed on settle chunk (freq={config.center_freq/1e6:.1f} MHz, "
+                f"rate={config.sample_rate/1e6:.1f} MHz). "
+                "Device may need a replug."
+            ) from exc
+        self._last_config_key = config_key
+
+    def start_stream(self, callback: Callable[[np.ndarray], None],
+                     num_samples: int) -> None:
+        """Start continuous async reading. Blocks until stop_stream().
+
+        callback(samples) fires for each chunk of I/Q samples with no gaps
+        between chunks (USB bulk transfers are continuously pipelined).
+        Call stop_stream() from another thread to unblock.
+        """
+        if self._sdr is None:
+            raise RuntimeError("Device not open. Use 'with SDRDevice() as sdr:'")
+        self._sdr.read_samples_async(lambda iq, ctx: callback(iq), num_samples)
+
+    def stop_stream(self) -> None:
+        """Cancel async reading, unblocking start_stream(). Thread-safe."""
+        if self._sdr is not None:
+            self._sdr.cancel_read_async()

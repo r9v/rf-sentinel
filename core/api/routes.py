@@ -5,7 +5,6 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from core.api import ws
 from core.api.models import ScanRequest, WaterfallRequest, LiveRequest, AudioToggleRequest, JobInfo
 from core.api.runner import JobRunner
 
@@ -15,7 +14,7 @@ def create_routes(runner: JobRunner) -> APIRouter:
 
     @router.get("/api/status")
     async def get_status():
-        return {"status": "online", "connected_clients": ws.client_count()}
+        return {"status": "online"}
 
     @router.post("/api/scan")
     async def start_scan(req: ScanRequest):
