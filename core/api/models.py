@@ -55,6 +55,11 @@ class AudioToggleRequest(BaseModel):
     demod_mode: DemodMode = Field(DemodMode.FM, description="Demodulation mode: fm or am")
 
 
+class VfoRequest(BaseModel):
+    """Set VFO frequency within the captured bandwidth."""
+    freq_mhz: float = Field(..., ge=24.0, le=1766.0, description="VFO frequency in MHz")
+
+
 class JobInfo(BaseModel):
     """Job status response."""
     id: str

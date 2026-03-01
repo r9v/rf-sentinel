@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWebSocket, LogEntry } from './hooks/useWebSocket';
 import { useAudioPlayer } from './hooks/useAudioPlayer';
-import { JobInfo } from './api';
+import { JobInfo, setVfo } from './api';
 import ControlPanel from './components/ControlPanel';
 import LogConsole from './components/LogConsole';
 import JobList from './components/JobList';
@@ -81,19 +81,21 @@ function Sidebar({ liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolu
   );
 }
 
-function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onClear }: {
+function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onClear, vfoFreq, onFreqClick }: {
   liveActive: boolean;
   liveFrame: SpectrumFrame | null;
   selectedJob: JobInfo | null;
   logs: LogEntry[];
   connected: boolean;
   onClear: () => void;
+  vfoFreq: number | null;
+  onFreqClick: (freq_mhz: number) => void;
 }) {
   return (
     <div className="flex-1 min-w-0 flex flex-col">
       <div className="flex-1 border-b border-gray-800 flex items-center justify-center overflow-hidden">
         {liveActive || liveFrame ? (
-          <SpectrumChart frame={liveFrame} mode="live" />
+          <SpectrumChart frame={liveFrame} mode="live" vfoFreq={vfoFreq} onFreqClick={onFreqClick} />
         ) : (
           <ResultView job={selectedJob} />
         )}
@@ -114,13 +116,27 @@ export default function App() {
   const [liveActive, setLiveActive] = useState(false);
   const [liveFrame, setLiveFrame] = useState<SpectrumFrame | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const [vfoFreq, setVfoFreq] = useState<number | null>(null);
+
+  const handleFreqClick = useCallback((freq_mhz: number) => {
+    if (!liveActive) return;
+    setVfoFreq(freq_mhz);
+    setVfo(freq_mhz).catch(() => {});
+  }, [liveActive]);
 
   useEffect(() => {
     if (lastMessage && lastMessage.type === 'spectrum') {
+      const freqs: number[] = lastMessage.freqs_mhz;
       setLiveFrame({
-        freqs_mhz: lastMessage.freqs_mhz,
+        freqs_mhz: freqs,
         power_db: lastMessage.power_db,
         peaks: lastMessage.peaks,
+      });
+      setVfoFreq(prev => {
+        if (prev != null) return prev;
+        const center = (freqs[0] + freqs[freqs.length - 1]) / 2;
+        setVfo(center).catch(() => {});
+        return center;
       });
     }
   }, [lastMessage]);
@@ -130,6 +146,7 @@ export default function App() {
     if (!active) {
       setLiveFrame(null);
       setAudioEnabled(false);
+      setVfoFreq(null);
       audio.stop();
     }
   }, [audio]);
@@ -164,6 +181,8 @@ export default function App() {
           logs={logs}
           connected={connected}
           onClear={clearLogs}
+          vfoFreq={vfoFreq}
+          onFreqClick={handleFreqClick}
         />
       </div>
     </div>

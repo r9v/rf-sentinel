@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from core.api.models import ScanRequest, WaterfallRequest, LiveRequest, RetuneRequest, AudioToggleRequest
+from core.api.models import ScanRequest, WaterfallRequest, LiveRequest, RetuneRequest, AudioToggleRequest, VfoRequest
 from core.api.runner import JobRunner
 
 
@@ -51,5 +51,12 @@ def create_routes(runner: JobRunner) -> APIRouter:
             return JSONResponse({"error": "Live mode is not active"}, status_code=400)
         runner.toggle_audio(req.enabled, req.demod_mode)
         return {"audio_enabled": req.enabled, "demod_mode": req.demod_mode}
+
+    @router.post("/api/live/vfo")
+    async def set_vfo(req: VfoRequest):
+        if not runner.live_active:
+            return JSONResponse({"error": "Live mode is not active"}, status_code=400)
+        runner.set_vfo(req.freq_mhz)
+        return {"vfo_freq_mhz": req.freq_mhz}
 
     return router

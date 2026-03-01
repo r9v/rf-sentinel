@@ -68,3 +68,7 @@ export async function toggleAudio(params: {
   return (await post('/api/live/audio', params)).json();
 }
 
+export async function setVfo(freq_mhz: number): Promise<{ vfo_freq_mhz: number }> {
+  return (await post('/api/live/vfo', { freq_mhz })).json();
+}
+

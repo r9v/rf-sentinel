@@ -25,6 +25,21 @@ class DemodState:
     last_iq_sample: Optional[complex] = None
     peak_ema: float = 0.0
     resample_phase: float = 0.0  # fractional input-sample position carried across frames
+    vfo_phase: float = 0.0       # accumulated phase for VFO frequency shift
+
+
+def vfo_shift(
+    iq: np.ndarray, offset_hz: float, sample_rate: float, phase: float = 0.0,
+) -> tuple[np.ndarray, float]:
+    """Frequency-shift I/Q by offset_hz with phase continuity across frames."""
+    if offset_hz == 0.0:
+        return iq, phase
+    phase_per_sample = 2.0 * np.pi * offset_hz / sample_rate
+    n = len(iq)
+    phases = phase + phase_per_sample * np.arange(n)
+    shifted = iq * np.exp(-1j * phases)
+    new_phase = (phase + phase_per_sample * n) % (2.0 * np.pi)
+    return shifted, new_phase
 
 
 def demodulate(

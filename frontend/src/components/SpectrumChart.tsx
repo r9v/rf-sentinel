@@ -11,7 +11,8 @@ export interface SpectrumFrame {
 interface Props {
   frame: SpectrumFrame | null;
   mode: 'live' | 'scan';
-  onPeakClick?: (freq_mhz: number) => void;
+  vfoFreq?: number | null;
+  onFreqClick?: (freq_mhz: number) => void;
 }
 
 const BG = '#0a0e1a';
@@ -22,6 +23,7 @@ const LINE = '#00d4ff';
 const FILL = 'rgba(0,212,255,0.12)';
 const PEAK = '#ff6b35';
 const MAX_HOLD_COLOR = 'rgba(255,100,50,0.25)';
+const VFO_COLOR = '#44ff44';
 
 // ── Plugins ──────────────────────────────────────────────
 
@@ -84,48 +86,136 @@ function peakMarkersPlugin(
   };
 }
 
-function clickPlugin(
-  peaksRef: React.MutableRefObject<SpectrumFrame['peaks']>,
+function vfoPlugin(
+  vfoRef: React.MutableRefObject<number | null>,
   cbRef: React.MutableRefObject<((freq_mhz: number) => void) | undefined>,
 ): uPlot.Plugin {
+  const HIT_PX = 8;
+  let dragging = false;
+
   return {
     hooks: {
+      draw: (u: uPlot) => {
+        const freq = vfoRef.current;
+        if (freq == null) return;
+        const { ctx, bbox } = u;
+        const dpr = uPlot.pxRatio;
+        const x = u.valToPos(freq, 'x', true);
+        if (x < bbox.left || x > bbox.left + bbox.width) return;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
+        ctx.clip();
+
+        ctx.strokeStyle = VFO_COLOR;
+        ctx.lineWidth = 1.5 * dpr;
+        ctx.setLineDash([4 * dpr, 3 * dpr]);
+        ctx.beginPath();
+        ctx.moveTo(x, bbox.top);
+        ctx.lineTo(x, bbox.top + bbox.height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = VFO_COLOR;
+        ctx.font = `bold ${Math.round(9 * dpr)}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`▼ ${freq.toFixed(3)}`, x, bbox.top + 12 * dpr);
+
+        ctx.restore();
+      },
+
       ready: (u: uPlot) => {
         const over = u.over;
         over.style.cursor = 'crosshair';
 
+        const nearVfo = (cx: number) => {
+          if (vfoRef.current == null) return false;
+          const vx = u.valToPos(vfoRef.current, 'x');
+          return Math.abs(cx - vx) < HIT_PX;
+        };
+
         over.addEventListener('mousemove', (e: MouseEvent) => {
+          if (dragging) return;
+          const rect = over.getBoundingClientRect();
+          over.style.cursor = nearVfo(e.clientX - rect.left) ? 'ew-resize' : 'crosshair';
+        });
+
+        over.addEventListener('mousedown', (e: MouseEvent) => {
           if (!cbRef.current) return;
           const rect = over.getBoundingClientRect();
           const cx = e.clientX - rect.left;
-          const cy = e.clientY - rect.top;
-          const near = peaksRef.current.some(pk => {
-            const px = u.valToPos(pk.freq_mhz, 'x');
-            const py = u.valToPos(pk.power_db, 'y');
-            return Math.hypot(px - cx, py - cy) < 15;
-          });
-          over.style.cursor = near ? 'pointer' : 'crosshair';
+
+          if (!nearVfo(cx)) return;
+
+          e.preventDefault();
+          dragging = true;
+          over.style.cursor = 'ew-resize';
+
+          const onMove = (ev: MouseEvent) => {
+            const mx = ev.clientX - rect.left;
+            const freq = u.posToVal(mx, 'x');
+            cbRef.current?.(freq);
+          };
+          const onUp = () => {
+            dragging = false;
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+          };
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
         });
 
         over.addEventListener('click', (e: MouseEvent) => {
-          if (!cbRef.current) return;
+          if (!cbRef.current || dragging) return;
           const rect = over.getBoundingClientRect();
           const cx = e.clientX - rect.left;
-          const cy = e.clientY - rect.top;
-
-          let closest: SpectrumFrame['peaks'][0] | null = null;
-          let closestDist = Infinity;
-          for (const pk of peaksRef.current) {
-            const px = u.valToPos(pk.freq_mhz, 'x');
-            const py = u.valToPos(pk.power_db, 'y');
-            const dist = Math.hypot(px - cx, py - cy);
-            if (dist < 15 && dist < closestDist) {
-              closestDist = dist;
-              closest = pk;
-            }
-          }
-          if (closest) cbRef.current(closest.freq_mhz);
+          if (nearVfo(cx)) return;
+          cbRef.current(u.posToVal(cx, 'x'));
         });
+      },
+    },
+  };
+}
+
+function wheelZoomPlugin(
+  xStartRef: React.MutableRefObject<number>,
+  xEndRef: React.MutableRefObject<number>,
+  dataXMinRef: React.MutableRefObject<number>,
+  dataXMaxRef: React.MutableRefObject<number>,
+  setXStart: (v: number) => void,
+  setXEnd: (v: number) => void,
+): uPlot.Plugin {
+  return {
+    hooks: {
+      ready: (u: uPlot) => {
+        u.over.addEventListener('wheel', (e: WheelEvent) => {
+          e.preventDefault();
+          const rect = u.over.getBoundingClientRect();
+          const cx = e.clientX - rect.left;
+          const cursorFreq = u.posToVal(cx, 'x');
+
+          const lo = xStartRef.current;
+          const hi = xEndRef.current;
+          const span = hi - lo;
+          const minSpan = 0.1;
+          const factor = e.deltaY > 0 ? 1.25 : 0.8;
+          const newSpan = Math.max(minSpan, span * factor);
+
+          const frac = (cursorFreq - lo) / span;
+          let nLo = cursorFreq - frac * newSpan;
+          let nHi = cursorFreq + (1 - frac) * newSpan;
+
+          const dMin = dataXMinRef.current;
+          const dMax = dataXMaxRef.current;
+          if (nLo < dMin) { nLo = dMin; nHi = dMin + newSpan; }
+          if (nHi > dMax) { nHi = dMax; nLo = dMax - newSpan; }
+          nLo = Math.max(dMin, nLo);
+          nHi = Math.min(dMax, nHi);
+
+          setXStart(nLo);
+          setXEnd(nHi);
+        }, { passive: false });
       },
     },
   };
@@ -237,15 +327,17 @@ const XZOOM_H = 24;
 const YZOOM_W = 24;
 
 export default function SpectrumChart({
-  frame, mode, onPeakClick,
+  frame, mode, vfoFreq, onFreqClick,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<uPlot | null>(null);
   const peaksRef = useRef<SpectrumFrame['peaks']>([]);
   const maxHoldRef = useRef<number[] | null>(null);
-  const onPeakClickRef = useRef(onPeakClick);
-  onPeakClickRef.current = onPeakClick;
+  const onFreqClickRef = useRef(onFreqClick);
+  onFreqClickRef.current = onFreqClick;
+  const vfoRef = useRef<number | null>(vfoFreq ?? null);
+  vfoRef.current = vfoFreq ?? null;
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 400, h: 300 });
   const [yLo, setYLo] = useState(-150);
   const [yHi, setYHi] = useState(0);
@@ -255,6 +347,10 @@ export default function SpectrumChart({
   yHiRef.current = yHi;
   const [dataXMin, setDataXMin] = useState(24);
   const [dataXMax, setDataXMax] = useState(1766);
+  const dataXMinRef = useRef(dataXMin);
+  const dataXMaxRef = useRef(dataXMax);
+  dataXMinRef.current = dataXMin;
+  dataXMaxRef.current = dataXMax;
   const [xStart, setXStart] = useState(24);
   const [xEnd, setXEnd] = useState(1766);
   const xStartRef = useRef(xStart);
@@ -352,7 +448,8 @@ export default function SpectrumChart({
       plugins: [
         bgPlugin(),
         peakMarkersPlugin(peaksRef),
-        clickPlugin(peaksRef, onPeakClickRef),
+        vfoPlugin(vfoRef, onFreqClickRef),
+        wheelZoomPlugin(xStartRef, xEndRef, dataXMinRef, dataXMaxRef, setXStart, setXEnd),
       ],
     };
 
@@ -424,6 +521,10 @@ export default function SpectrumChart({
   useEffect(() => {
     chartRef.current?.setScale('x', { min: xStart, max: xEnd });
   }, [xStart, xEnd]);
+
+  useEffect(() => {
+    chartRef.current?.redraw(false);
+  }, [vfoFreq]);
 
   const fMin = frame?.freqs_mhz?.[0];
   const fMax = frame?.freqs_mhz?.[frame?.freqs_mhz?.length - 1];

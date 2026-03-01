@@ -99,6 +99,7 @@ class JobRunner:
         self._audio_enabled = False
         self._demod_mode = DemodMode.FM
         self._demod_state = None
+        self._vfo_freq_hz: Optional[float] = None
 
     def _submit_job(self, job_type: str, params: dict, run_fn: Callable) -> Job:
         if self._live_active:
@@ -284,6 +285,7 @@ class JobRunner:
         self._audio_enabled = audio_enabled
         self._demod_mode = demod_mode
         self._demod_state = None
+        self._vfo_freq_hz = None
         self._live_active = True
         self._live_thread = threading.Thread(
             target=self._live_loop,
@@ -350,6 +352,16 @@ class JobRunner:
     def audio_enabled(self) -> bool:
         return self._audio_enabled
 
+    @property
+    def vfo_freq_hz(self) -> Optional[float]:
+        return self._vfo_freq_hz
+
+    def set_vfo(self, freq_mhz: float) -> None:
+        """Set VFO frequency for audio demod within the captured bandwidth."""
+        self._vfo_freq_hz = freq_mhz * 1e6
+        self._demod_state = None
+        _emit("live", f"VFO → {freq_mhz:.3f} MHz")
+
     def _process_live_frame(self, capture, sample_rate: float,
                             frame_count: int, send_spectrum: bool) -> None:
         """Process a single live frame.
@@ -359,12 +371,22 @@ class JobRunner:
         to avoid wasting CPU and WS bandwidth on every small frame.
         """
         from core.dsp import demodulate
+        from core.dsp.demod import vfo_shift
 
         if self._audio_enabled:
             try:
+                iq = capture.samples
+                if self._vfo_freq_hz is not None and self._live_config:
+                    offset_hz = self._vfo_freq_hz - self._live_config.center_freq
+                    if self._demod_state is None:
+                        from core.dsp.demod import DemodState
+                        self._demod_state = DemodState()
+                    iq, self._demod_state.vfo_phase = vfo_shift(
+                        iq, offset_hz, sample_rate, self._demod_state.vfo_phase,
+                    )
                 mode = DemodMode(self._demod_mode)
                 pcm, self._demod_state = demodulate(
-                    capture.samples, sample_rate, mode, self._demod_state,
+                    iq, sample_rate, mode, self._demod_state,
                 )
                 _emit_audio(pcm.tobytes())
             except Exception as e:
