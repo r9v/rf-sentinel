@@ -15,6 +15,13 @@ interface Props {
   onFreqClick?: (freq_mhz: number) => void;
 }
 
+function useStateRef<T>(init: T): [T, (v: T) => void, React.MutableRefObject<T>] {
+  const [val, setVal] = useState(init);
+  const ref = useRef(val);
+  ref.current = val;
+  return [val, setVal, ref];
+}
+
 const BG = '#0a0e1a';
 const PLOT_BG = '#0f1525';
 const GRID = 'rgba(255,255,255,0.08)';
@@ -342,24 +349,12 @@ export default function SpectrumChart({
   const vfoRef = useRef<number | null>(vfoFreq ?? null);
   vfoRef.current = vfoFreq ?? null;
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 400, h: 300 });
-  const [yLo, setYLo] = useState(-150);
-  const [yHi, setYHi] = useState(0);
-  const yLoRef = useRef(yLo);
-  const yHiRef = useRef(yHi);
-  yLoRef.current = yLo;
-  yHiRef.current = yHi;
-  const [dataXMin, setDataXMin] = useState(24);
-  const [dataXMax, setDataXMax] = useState(1766);
-  const dataXMinRef = useRef(dataXMin);
-  const dataXMaxRef = useRef(dataXMax);
-  dataXMinRef.current = dataXMin;
-  dataXMaxRef.current = dataXMax;
-  const [xStart, setXStart] = useState(24);
-  const [xEnd, setXEnd] = useState(1766);
-  const xStartRef = useRef(xStart);
-  const xEndRef = useRef(xEnd);
-  xStartRef.current = xStart;
-  xEndRef.current = xEnd;
+  const [yLo, setYLo, yLoRef] = useStateRef(-150);
+  const [yHi, setYHi, yHiRef] = useStateRef(0);
+  const [dataXMin, setDataXMin, dataXMinRef] = useStateRef(24);
+  const [dataXMax, setDataXMax, dataXMaxRef] = useStateRef(1766);
+  const [xStart, setXStart, xStartRef] = useStateRef(24);
+  const [xEnd, setXEnd, xEndRef] = useStateRef(1766);
   const prevDataRange = useRef('');
   const [plotPad, setPlotPad] = useState({ left: 0, right: 0 });
   const syncPlotPad = useCallback(() => {
