@@ -13,7 +13,7 @@ export interface ChartView {
 export interface SpectrumFrame {
   freqs_mhz: number[];
   power_db: number[];
-  peaks: { freq_mhz: number; power_db: number; bandwidth_khz: number; signal_type?: string }[];
+  peaks: { freq_mhz: number; power_db: number; bandwidth_khz: number; signal_type?: string; duty_cycle?: number }[];
 }
 
 interface Props {
@@ -203,17 +203,26 @@ function vfoPlugin(
           return Math.abs(cx - vx) < HIT_PX;
         };
 
+        const nearPeak = (cx: number, cy: number) => {
+          let bestPk: SpectrumFrame['peaks'][0] | null = null;
+          let bestDist = PEAK_HIT_PX;
+          for (const pk of peaksRef.current) {
+            const px = u.valToPos(pk.freq_mhz, 'x');
+            const py = u.valToPos(pk.power_db, 'y');
+            const dist = Math.hypot(cx - px, cy - py);
+            if (dist < bestDist) { bestDist = dist; bestPk = pk; }
+          }
+          return bestPk;
+        };
+
         over.addEventListener('mousemove', (e: MouseEvent) => {
           if (dragging) return;
           const rect = over.getBoundingClientRect();
           const cx = e.clientX - rect.left;
+          const cy = e.clientY - rect.top;
           if (nearVfo(cx)) { over.style.cursor = 'ew-resize'; return; }
           if (modeRef.current === 'scan' && cbRef.current) {
-            let near = false;
-            for (const pk of peaksRef.current) {
-              if (Math.abs(cx - u.valToPos(pk.freq_mhz, 'x')) < PEAK_HIT_PX) { near = true; break; }
-            }
-            over.style.cursor = near ? 'pointer' : 'crosshair';
+            over.style.cursor = nearPeak(cx, cy) ? 'pointer' : 'crosshair';
           } else {
             over.style.cursor = 'crosshair';
           }
@@ -282,16 +291,11 @@ function vfoPlugin(
           if (!cbRef.current || suppressClick) { suppressClick = false; return; }
           const rect = over.getBoundingClientRect();
           const cx = e.clientX - rect.left;
+          const cy = e.clientY - rect.top;
           if (nearVfo(cx)) return;
           if (modeRef.current === 'scan') {
-            let bestPk: SpectrumFrame['peaks'][0] | null = null;
-            let bestDist = PEAK_HIT_PX;
-            for (const pk of peaksRef.current) {
-              const px = u.valToPos(pk.freq_mhz, 'x');
-              const d = Math.abs(cx - px);
-              if (d < bestDist) { bestDist = d; bestPk = pk; }
-            }
-            if (bestPk) cbRef.current(bestPk.freq_mhz);
+            const pk = nearPeak(cx, cy);
+            if (pk) cbRef.current(pk.freq_mhz);
           } else {
             cbRef.current(u.posToVal(cx, 'x'));
           }

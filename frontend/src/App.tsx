@@ -87,6 +87,9 @@ function SignalTable({ peaks, vfoFreq, onFreqClick }: {
               <span className="text-gray-200 w-24">{pk.freq_mhz.toFixed(3)} MHz</span>
               <span className="text-gray-400 w-16">{pk.power_db.toFixed(1)} dB</span>
               <span className="text-gray-600 w-14">{pk.bandwidth_khz.toFixed(0)} kHz</span>
+              {pk.duty_cycle != null && (
+                <span className="text-gray-600 w-10">{(pk.duty_cycle * 100).toFixed(0)}%</span>
+              )}
             </div>
           );
         })}

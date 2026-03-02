@@ -66,6 +66,96 @@ def _edge_steepness(power_db: np.ndarray, freq_step_khz: float) -> float:
     return float((left_slope + right_slope) / 2)
 
 
+DUTY_CYCLE_THRESHOLD_DB = 3.0
+
+
+def _temporal_features(
+    freqs_mhz: np.ndarray,
+    waterfall_db: np.ndarray,
+    peak_freq_mhz: float,
+    bw_khz: float,
+) -> tuple[float, float]:
+    """Extract duty_cycle and power_variance from 2D waterfall at a peak.
+
+    waterfall_db: shape [freq x time] in dB.
+    Returns (duty_cycle, power_variance_db).
+    """
+    n_freq = len(freqs_mhz)
+    freq_step_mhz = (freqs_mhz[-1] - freqs_mhz[0]) / (n_freq - 1)
+    center_idx = int(np.argmin(np.abs(freqs_mhz - peak_freq_mhz)))
+
+    half_bw_bins = max(1, int(bw_khz / 2 / 1000 / freq_step_mhz))
+    sig_lo = max(0, center_idx - half_bw_bins)
+    sig_hi = min(n_freq, center_idx + half_bw_bins + 1)
+
+    # Signal time series: mean power across peak's freq bins per time slice
+    time_series = np.mean(waterfall_db[sig_lo:sig_hi, :], axis=0)
+
+    if len(time_series) < 3:
+        return 1.0, 0.0
+
+    # Noise reference: median of neighboring freq bins outside the signal
+    margin = max(half_bw_bins, 10)
+    noise_lo = max(0, sig_lo - margin * 2)
+    noise_hi = min(n_freq, sig_hi + margin * 2)
+    # Exclude signal bins — take from left and right flanks
+    left = waterfall_db[noise_lo:max(noise_lo, sig_lo - margin), :]
+    right = waterfall_db[min(n_freq, sig_hi + margin):noise_hi, :]
+    noise_bins = np.concatenate([left, right], axis=0) if left.size and right.size else (
+        left if left.size else right
+    )
+    if noise_bins.size > 0:
+        noise_level = float(np.median(noise_bins))
+    else:
+        noise_level = float(np.percentile(time_series, 10))
+
+    above = time_series > noise_level + DUTY_CYCLE_THRESHOLD_DB
+    duty_cycle = float(np.mean(above))
+    power_var = float(np.var(time_series))
+
+    return duty_cycle, power_var
+
+
+def _apply_temporal(
+    signal_type: str,
+    confidence: float,
+    duty_cycle: float,
+    power_var: float,
+    occ_bw: float,
+    bw_khz: float,
+    prominence: float,
+) -> tuple[str, float]:
+    """Reclassify using temporal features from waterfall data.
+
+    Bursty/intermittent signals (low duty cycle, high variance) are likely
+    voice comms (aviation, ham), not broadcast.  Continuous high-duty-cycle
+    signals reinforce broadcast/digital classification.
+    """
+    # Very low duty cycle = intermittent transmission (PTT voice, bursty data)
+    if duty_cycle < 0.4 and power_var > 5.0:
+        if signal_type in (FM_BROADCAST, AM_BROADCAST, DIGITAL, UNKNOWN):
+            if occ_bw <= 35:
+                return NARROWBAND_FM, 0.65
+            return NARROWBAND_FM, 0.55
+
+    # Moderate duty cycle with high variance = likely voice/intermittent
+    if duty_cycle < 0.7 and power_var > 10.0:
+        if signal_type == FM_BROADCAST and occ_bw < 100:
+            return NARROWBAND_FM, 0.6
+
+    # High duty cycle + low variance reinforces broadcast/digital
+    if duty_cycle > 0.9 and power_var < 3.0:
+        if signal_type == FM_BROADCAST:
+            confidence = min(0.95, confidence + 0.05)
+        elif signal_type == DIGITAL:
+            confidence = min(0.90, confidence + 0.05)
+
+    return signal_type, confidence
+
+
+_NFM_COMPATIBLE = {AVIATION, HAM, ISM, NARROWBAND_FM}
+
+
 def _apply_band_prior(freq_mhz: float, signal_type: str, confidence: float) -> tuple[str, float, str | None]:
     """Adjust classification using frequency band knowledge.
 
@@ -78,12 +168,15 @@ def _apply_band_prior(freq_mhz: float, signal_type: str, confidence: float) -> t
     expected = band.expected_type
 
     if signal_type == expected:
-        # Spectral and band agree — boost confidence
         return signal_type, min(0.98, confidence + 0.1), band.name
 
     if signal_type == UNKNOWN:
-        # No spectral match but we know the band — use band's expected type
         return expected, 0.55, band.name
+
+    # NFM is a generic narrowband voice/data type — promote to the band's
+    # specific type when compatible (e.g. NFM on airband → aviation)
+    if signal_type == NARROWBAND_FM and expected in _NFM_COMPATIBLE:
+        return expected, min(0.90, confidence + 0.05), band.name
 
     # Spectral says one thing, band says another — trust spectral but note the band
     return signal_type, max(0.3, confidence - 0.1), band.name
@@ -93,6 +186,7 @@ def _classify_one(
     freqs_mhz: np.ndarray,
     power_db: np.ndarray,
     peak,
+    waterfall_db: np.ndarray | None = None,
 ) -> dict:
     """Classify a single peak and return a dict with peak fields + classification."""
     freq_step_khz = float((freqs_mhz[-1] - freqs_mhz[0]) / (len(freqs_mhz) - 1) * 1000)
@@ -115,6 +209,14 @@ def _classify_one(
     occ_bw = _occupied_bandwidth_khz(sl_freqs, sl_linear)
     steepness = _edge_steepness(sl_db, freq_step_khz)
 
+    # Temporal features from waterfall (scan mode only)
+    duty_cycle: float | None = None
+    power_var: float | None = None
+    if waterfall_db is not None and waterfall_db.shape[1] >= 3:
+        duty_cycle, power_var = _temporal_features(
+            freqs_mhz, waterfall_db, peak.freq_mhz, bw_khz,
+        )
+
     # Rule-based spectral classification
     signal_type = UNKNOWN
     confidence = 0.5
@@ -135,11 +237,18 @@ def _classify_one(
         signal_type = AM_BROADCAST
         confidence = 0.5
 
+    # Temporal override: reclassify bursty signals that look like FM on airband
+    if duty_cycle is not None:
+        signal_type, confidence = _apply_temporal(
+            signal_type, confidence, duty_cycle, power_var or 0.0,
+            occ_bw, bw_khz, prominence,
+        )
+
     # Apply band-aware prior
     peak_freq = getattr(peak, "freq_mhz", 0.0)
     signal_type, confidence, band_name = _apply_band_prior(peak_freq, signal_type, confidence)
 
-    return {
+    result = {
         "freq_mhz": round(peak_freq, 4),
         "power_db": round(getattr(peak, "power_db", 0.0), 1),
         "prominence_db": round(prominence, 1),
@@ -148,14 +257,21 @@ def _classify_one(
         "confidence": round(confidence, 2),
         "band": band_name,
     }
+    if duty_cycle is not None:
+        result["duty_cycle"] = round(duty_cycle, 2)
+    return result
 
 
 def classify_peaks(
     freqs_mhz: np.ndarray,
     power_db: np.ndarray,
     peaks,
+    waterfall_db: np.ndarray | None = None,
 ) -> list[dict]:
-    """Classify a list of peaks and return dicts with signal_type + confidence."""
+    """Classify a list of peaks and return dicts with signal_type + confidence.
+
+    waterfall_db: optional 2D array [freq x time] in dB for temporal features.
+    """
     if len(freqs_mhz) < 4 or not peaks:
         return []
-    return [_classify_one(freqs_mhz, power_db, pk) for pk in peaks]
+    return [_classify_one(freqs_mhz, power_db, pk, waterfall_db) for pk in peaks]

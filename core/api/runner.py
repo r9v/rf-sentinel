@@ -175,7 +175,8 @@ class JobRunner:
             _emit(job.id, "Detecting signals...")
             raw_peaks = find_peaks(result.freqs_mhz, result.mean_psd_db)
             self._log_peaks(job.id, raw_peaks)
-            peaks = classify_peaks(result.freqs_mhz, result.mean_psd_db, raw_peaks)
+            peaks = classify_peaks(result.freqs_mhz, result.mean_psd_db, raw_peaks,
+                                   waterfall_db=result.power_db)
 
             # 1D spectrum: send at full res (uPlot handles 25k+ points fine)
             spec_freqs = np.round(result.freqs_mhz, 4).tolist()
