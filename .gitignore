@@ -33,6 +33,7 @@ data/*.npy
 
 # Matplotlib output
 *.png
+!showcase*.png
 
 # Jupyter
 .ipynb_checkpoints/

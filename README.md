@@ -4,6 +4,8 @@
 
 RTL-SDR based tool for real-time RF spectrum analysis, signal detection, and automatic classification.
 
+![RFSentinel scanning the FM broadcast band](showcase1.png)
+
 ## Quick Start
 
 ```bash
@@ -53,6 +55,7 @@ Adaptive noise floor estimation with threshold-then-segment peak finding:
 
 - Rolling 25th-percentile filter (501-bin window) — robust in dense signal environments
 - Contiguous above-threshold regions merged across small gaps (≤50 kHz), capped at 300 kHz bandwidth
+- Max-hold peak detection: runs find_peaks on max PSD from waterfall to catch brief/intermittent transmissions missed by time-averaged spectrum
 - Auto-scaling peak limit based on scan bandwidth (5 peaks/MHz)
 - Peaks ranked by SNR (prominence above local noise floor)
 
@@ -61,9 +64,10 @@ Adaptive noise floor estimation with threshold-then-segment peak finding:
 Rule-based spectral classification with band-aware confidence adjustment:
 
 - Spectral features: flatness, occupied bandwidth (99% power), edge steepness
-- Types: FM broadcast, narrowband FM, AM, digital, carrier/CW
+- Temporal features from waterfall: duty cycle (fraction of time active) and power variance to distinguish bursty voice comms from continuous broadcasts
+- Types: FM broadcast, narrowband FM, AM, digital, carrier/CW, aviation, ham, ISM, GSM, ADS-B
 - Band database (12 entries): FM/AM broadcast, airband, ham bands, PMR446, ISM 433/868, GSM 900, ADS-B
-- Band prior boosts confidence when spectral type matches expected allocation
+- Band prior promotes narrowband detections to band-specific types (e.g. NFM on airband → aviation)
 
 ### Frontend
 
