@@ -182,7 +182,7 @@ function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAu
   );
 }
 
-function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onClear, vfoFreq, onFreqClick }: {
+function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onClear, vfoFreq, onFreqClick, onScanFreqClick }: {
   liveActive: boolean;
   liveFrame: SpectrumFrame | null;
   selectedJob: JobInfo | null;
@@ -191,6 +191,7 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
   onClear: () => void;
   vfoFreq: number | null;
   onFreqClick: (freq_mhz: number) => void;
+  onScanFreqClick: (freq_mhz: number) => void;
 }) {
   const [chartView, setChartView] = useState<ChartView | null>(null);
 
@@ -207,7 +208,7 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
             </div>
           </>
         ) : (
-          <ResultView job={selectedJob} />
+          <ResultView job={selectedJob} onFreqClick={onScanFreqClick} />
         )}
       </div>
       <LogConsole logs={logs} connected={connected} onClear={onClear} />
@@ -315,6 +316,7 @@ export default function App() {
           onClear={clearLogs}
           vfoFreq={audioEnabled ? vfoFreq : null}
           onFreqClick={handleFreqClick}
+          onScanFreqClick={handleScanPeakClick}
         />
       </div>
     </div>

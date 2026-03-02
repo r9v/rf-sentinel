@@ -152,8 +152,11 @@ function vfoPlugin(
   dataXMaxRef: React.MutableRefObject<number>,
   setXStart: (v: number) => void,
   setXEnd: (v: number) => void,
+  peaksRef: React.MutableRefObject<SpectrumFrame['peaks']>,
+  modeRef: React.MutableRefObject<string>,
 ): uPlot.Plugin {
   const HIT_PX = 8;
+  const PEAK_HIT_PX = 12;
   const DRAG_THRESHOLD = 4;
   let dragging: 'vfo' | 'pan' | false = false;
   let suppressClick = false;
@@ -203,7 +206,17 @@ function vfoPlugin(
         over.addEventListener('mousemove', (e: MouseEvent) => {
           if (dragging) return;
           const rect = over.getBoundingClientRect();
-          over.style.cursor = nearVfo(e.clientX - rect.left) ? 'ew-resize' : 'crosshair';
+          const cx = e.clientX - rect.left;
+          if (nearVfo(cx)) { over.style.cursor = 'ew-resize'; return; }
+          if (modeRef.current === 'scan' && cbRef.current) {
+            let near = false;
+            for (const pk of peaksRef.current) {
+              if (Math.abs(cx - u.valToPos(pk.freq_mhz, 'x')) < PEAK_HIT_PX) { near = true; break; }
+            }
+            over.style.cursor = near ? 'pointer' : 'crosshair';
+          } else {
+            over.style.cursor = 'crosshair';
+          }
         });
 
         over.addEventListener('mousedown', (e: MouseEvent) => {
@@ -270,7 +283,18 @@ function vfoPlugin(
           const rect = over.getBoundingClientRect();
           const cx = e.clientX - rect.left;
           if (nearVfo(cx)) return;
-          cbRef.current(u.posToVal(cx, 'x'));
+          if (modeRef.current === 'scan') {
+            let bestPk: SpectrumFrame['peaks'][0] | null = null;
+            let bestDist = PEAK_HIT_PX;
+            for (const pk of peaksRef.current) {
+              const px = u.valToPos(pk.freq_mhz, 'x');
+              const d = Math.abs(cx - px);
+              if (d < bestDist) { bestDist = d; bestPk = pk; }
+            }
+            if (bestPk) cbRef.current(bestPk.freq_mhz);
+          } else {
+            cbRef.current(u.posToVal(cx, 'x'));
+          }
         });
       },
     },
@@ -340,6 +364,8 @@ export default function SpectrumChart({
   onViewChangeRef.current = onViewChange;
   const vfoRef = useRef<number | null>(vfoFreq ?? null);
   vfoRef.current = vfoFreq ?? null;
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 400, h: 300 });
   const [yLo, setYLo, yLoRef] = useStateRef(-150);
   const [yHi, setYHi, yHiRef] = useStateRef(0);
@@ -450,7 +476,7 @@ export default function SpectrumChart({
       plugins: [
         bgPlugin(),
         peakMarkersPlugin(peaksRef),
-        vfoPlugin(vfoRef, onFreqClickRef, xStartRef, xEndRef, dataXMinRef, dataXMaxRef, setXStart, setXEnd),
+        vfoPlugin(vfoRef, onFreqClickRef, xStartRef, xEndRef, dataXMinRef, dataXMaxRef, setXStart, setXEnd, peaksRef, modeRef),
         wheelZoomPlugin(xStartRef, xEndRef, dataXMinRef, dataXMaxRef, setXStart, setXEnd),
       ],
     };

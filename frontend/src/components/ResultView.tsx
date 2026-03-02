@@ -6,6 +6,7 @@ import WaterfallCanvas from './WaterfallCanvas';
 
 interface Props {
   job: JobInfo | null;
+  onFreqClick?: (freq_mhz: number) => void;
 }
 
 function EmptyState() {
@@ -65,7 +66,7 @@ function JobHeader({ job }: { job: JobInfo }) {
   );
 }
 
-function ScanResult({ job }: { job: JobInfo }) {
+function ScanResult({ job, onFreqClick }: { job: JobInfo; onFreqClick?: (freq_mhz: number) => void }) {
   const [chartView, setChartView] = useState<ChartView | null>(null);
   const [dataDbRange, setDataDbRange] = useState<[number, number]>([-120, -20]);
   const [dbRange, setDbRange] = useState<[number, number] | null>(null);
@@ -96,7 +97,7 @@ function ScanResult({ job }: { job: JobInfo }) {
     <div className="flex flex-col h-full">
       {frame && (
         <div className="flex-[2] min-h-0">
-          <SpectrumChart frame={frame} mode="scan" onViewChange={setChartView} />
+          <SpectrumChart frame={frame} mode="scan" onFreqClick={onFreqClick} onViewChange={setChartView} />
         </div>
       )}
       <div className="flex-1 min-h-0 flex">
@@ -117,7 +118,7 @@ function ScanResult({ job }: { job: JobInfo }) {
   );
 }
 
-export default function ResultView({ job }: Props) {
+export default function ResultView({ job, onFreqClick }: Props) {
   if (!job) return <EmptyState />;
   if (job.status === 'pending' || job.status === 'running') return <LoadingState job={job} />;
   if (job.status === 'error') return <ErrorState job={job} />;
@@ -126,7 +127,7 @@ export default function ResultView({ job }: Props) {
     <div className="flex flex-col h-full">
       <JobHeader job={job} />
       <div className="flex-1 min-h-0">
-        <ScanResult job={job} />
+        <ScanResult job={job} onFreqClick={onFreqClick} />
       </div>
     </div>
   );
