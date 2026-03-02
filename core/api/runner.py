@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 import uuid
 import logging
-import threading
 import traceback
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -13,14 +12,11 @@ from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 
 from core.api.models import JobStatus
-from core.dsp.types import DemodMode
+from core.api.live import LiveSession
 import numpy as np
 
 logger = logging.getLogger("rfsentinel.runner")
 
-LIVE_PSD_NFFT = 2048
-LIVE_FRAME_DURATION_S = 0.1
-SPECTRUM_SEND_INTERVAL = 5  # send spectrum every N frames
 SCAN_WF_MAX_FREQ_BINS = 1024
 SCAN_WF_MAX_TIME_BINS = 256
 
@@ -59,7 +55,8 @@ def set_job_status_callback(cb: Callable[[dict], None]) -> None:
 
 def _emit(job_id: str, msg: str) -> None:
     """Send a log line to the WebSocket callback."""
-    logger.info(f"[{job_id[:8]}] {msg}")
+    if job_id != "__spectrum__":
+        logger.info(f"[{job_id[:8]}] {msg}")
     if _log_callback:
         _log_callback(job_id, msg)
 
@@ -90,25 +87,11 @@ class JobRunner:
     def __init__(self):
         self.jobs: dict[str, Job] = {}
         self._pool = ThreadPoolExecutor(max_workers=1)
-        self._live_active = False
-        self._live_thread = None
-        self._live_sdr: "SDRDevice | None" = None
-        self._live_config = None
-        self._audio_enabled = False
-        self._demod_mode = DemodMode.FM
-        self._demod_state = None
-        self._vfo_freq_hz: Optional[float] = None
-        self._peak_tracker = None
-        self._psd_smoother = None
-
-    def _reset_dsp_state(self) -> None:
-        self._demod_state = None
-        self._peak_tracker = None
-        self._psd_smoother = None
+        self.live = LiveSession(emit=_emit, emit_audio=_emit_audio)
 
     def _submit_job(self, job_type: str, params: dict, run_fn: Callable) -> Job:
-        if self._live_active:
-            self.stop_live()
+        if self.live.active:
+            self.live.stop()
         job_id = uuid.uuid4().hex[:12]
         job = Job(id=job_id, type=job_type, status=JobStatus.PENDING, params=params)
         self.jobs[job_id] = job
@@ -226,224 +209,3 @@ class JobRunner:
             logger.error(traceback.format_exc())
         finally:
             import gc; gc.collect()
-
-    # ── Live mode ────────────────────────────────────────
-
-    @staticmethod
-    def _live_params(start_mhz: float, stop_mhz: float) -> tuple[float, float, float, float]:
-        """Compute center_hz, sample_rate, clamped start/stop for live mode."""
-        from core.dsp import SAMPLE_RATE
-        MAX_BW = SAMPLE_RATE / 1e6
-        if stop_mhz - start_mhz > MAX_BW:
-            stop_mhz = start_mhz + MAX_BW
-        center_hz = (start_mhz + stop_mhz) / 2 * 1e6
-        bw_hz = (stop_mhz - start_mhz) * 1e6
-        sample_rate = min(max(bw_hz, 0.25e6), SAMPLE_RATE)
-        return center_hz, sample_rate, start_mhz, stop_mhz
-
-    def start_live(self, start_mhz: float, stop_mhz: float, gain: float,
-                    audio_enabled: bool = False, demod_mode: DemodMode = DemodMode.FM) -> None:
-        """Start continuous spectrum capture with optional audio demod."""
-        if self._live_active:
-            self.stop_live()
-
-        center_hz, sample_rate, start_mhz, stop_mhz = self._live_params(start_mhz, stop_mhz)
-
-        self._audio_enabled = audio_enabled
-        self._demod_mode = demod_mode
-        self._vfo_freq_hz = None
-        self._reset_dsp_state()
-        self._live_active = True
-        self._live_thread = threading.Thread(
-            target=self._live_loop,
-            args=(center_hz, sample_rate, gain, start_mhz, stop_mhz),
-            daemon=True,
-        )
-        self._live_thread.start()
-        audio_tag = f" [audio: {demod_mode.upper()}]" if audio_enabled else ""
-        _emit("live", f"Live started: {start_mhz:.1f}–{stop_mhz:.1f} MHz{audio_tag}")
-
-    def stop_live(self) -> None:
-        """Stop continuous spectrum capture."""
-        self._live_active = False
-        self._audio_enabled = False
-        if self._live_sdr:
-            self._live_sdr.stop_stream()
-        if self._live_thread:
-            self._live_thread.join(timeout=3)
-            self._live_thread = None
-        self._live_sdr = None
-        self._live_config = None
-        _emit("live", "Live stopped")
-
-    def retune_live(self, start_mhz: float, stop_mhz: float, gain: float) -> None:
-        """Retune the live stream in-place — no stream interruption.
-
-        Sets center_freq and gain via USB control transfers (I2C) which
-        don't conflict with the bulk sample transfers already running.
-        """
-        if not self._live_active or not self._live_sdr:
-            return
-
-        from core.sdr import CaptureConfig
-
-        center_hz, sample_rate, start_mhz, stop_mhz = self._live_params(start_mhz, stop_mhz)
-
-        if self._live_config and sample_rate != self._live_config.sample_rate:
-            _emit("live", "Sample rate changed — restarting stream")
-            self.stop_live()
-            self.start_live(start_mhz, stop_mhz, gain, self._audio_enabled, self._demod_mode)
-            return
-
-        self._live_sdr.retune(center_hz, gain)
-        self._live_config = CaptureConfig(
-            center_freq=center_hz, sample_rate=sample_rate,
-            gain=gain, duration=0,
-        )
-        self._reset_dsp_state()
-        logger.debug("retune: fc=%.3f MHz gain=%.0f dB", center_hz / 1e6, gain)
-
-    def toggle_audio(self, enabled: bool, demod_mode: DemodMode = DemodMode.FM) -> None:
-        """Toggle audio demod on/off while live is running."""
-        self._audio_enabled = enabled
-        self._demod_mode = demod_mode
-        self._reset_dsp_state()
-        state = f"ON ({demod_mode.upper()})" if enabled else "OFF"
-        _emit("live", f"Audio {state}")
-
-    @property
-    def live_active(self) -> bool:
-        return self._live_active
-
-    @property
-    def audio_enabled(self) -> bool:
-        return self._audio_enabled
-
-    @property
-    def vfo_freq_hz(self) -> Optional[float]:
-        return self._vfo_freq_hz
-
-    def set_vfo(self, freq_mhz: float) -> None:
-        """Set VFO frequency for audio demod within the captured bandwidth."""
-        self._vfo_freq_hz = freq_mhz * 1e6
-        self._reset_dsp_state()
-        _emit("live", f"VFO → {freq_mhz:.3f} MHz")
-
-    def _process_live_frame(self, capture, sample_rate: float,
-                            frame_count: int, send_spectrum: bool) -> None:
-        """Process a single live frame.
-
-        Audio demod runs every frame (time-sensitive for smooth playback).
-        Spectrum (PSD + peaks + JSON) only runs when send_spectrum is True
-        to avoid wasting CPU and WS bandwidth on every small frame.
-        """
-        from core.dsp import demodulate
-        from core.dsp.demod import vfo_shift
-
-        if self._audio_enabled:
-            try:
-                iq = capture.samples
-                if self._vfo_freq_hz is not None and self._live_config:
-                    offset_hz = self._vfo_freq_hz - self._live_config.center_freq
-                    if self._demod_state is None:
-                        from core.dsp.demod import DemodState
-                        self._demod_state = DemodState()
-                    iq, self._demod_state.vfo_phase = vfo_shift(
-                        iq, offset_hz, sample_rate, self._demod_state.vfo_phase,
-                    )
-                mode = DemodMode(self._demod_mode)
-                pcm, self._demod_state = demodulate(
-                    iq, sample_rate, mode, self._demod_state,
-                )
-                _emit_audio(pcm.tobytes())
-            except Exception as e:
-                logger.warning("audio demod error frame %d: %s", frame_count, e)
-
-        if send_spectrum:
-            self._send_spectrum(capture)
-
-    def _send_spectrum(self, capture) -> None:
-        """Compute and send spectrum data over WebSocket."""
-        import json
-        from core.dsp import compute_psd, find_peaks
-        from core.dsp.peaks import PsdSmoother
-        from core.dsp.tracker import PeakTracker
-        from core.dsp.classify import classify_peaks
-
-        DOWNSAMPLE_POINTS = 1024
-        result = compute_psd(capture, nfft=LIVE_PSD_NFFT)
-
-        if self._psd_smoother is None:
-            self._psd_smoother = PsdSmoother()
-        smoothed = self._psd_smoother.update(result.power_db)
-
-        step = max(1, len(result.freqs_mhz) // DOWNSAMPLE_POINTS)
-        freqs = result.freqs_mhz[::step]
-        power = smoothed[::step]
-
-        raw_peaks = find_peaks(result.freqs_mhz, smoothed)
-        if self._peak_tracker is None:
-            self._peak_tracker = PeakTracker()
-        tracked = self._peak_tracker.update(raw_peaks, result.freqs_mhz, smoothed)
-        classified = classify_peaks(result.freqs_mhz, smoothed, tracked)
-
-        payload = json.dumps({
-            "type": "spectrum",
-            "freqs_mhz": freqs.tolist(),
-            "power_db": power.tolist(),
-            "peaks": classified,
-        })
-
-        if _log_callback:
-            _log_callback("__spectrum__", payload)
-
-    def _live_loop(self, center_hz: float, sample_rate: float,
-                   gain: float, start_mhz: float, stop_mhz: float) -> None:
-        """Continuous streaming loop using async USB reads.
-
-        Uses rtlsdr_read_async for gapless sample delivery.
-        Retune happens in-place via SDR property setters (USB control
-        transfers) without interrupting the bulk sample stream.
-        """
-        from core.sdr import SDRDevice, CaptureConfig, CaptureResult
-
-        SPECTRUM_EVERY = SPECTRUM_SEND_INTERVAL
-        frame_count = 0
-
-        try:
-            with SDRDevice() as sdr:
-                self._live_sdr = sdr
-                self._live_config = CaptureConfig(
-                    center_freq=center_hz, sample_rate=sample_rate,
-                    gain=gain, duration=0,
-                )
-                sdr.configure(self._live_config)
-                chunk_samples = int(sample_rate * LIVE_FRAME_DURATION_S)
-                def on_chunk(iq):
-                    nonlocal frame_count
-                    if not self._live_active:
-                        sdr.stop_stream()
-                        return
-                    cfg = self._live_config
-                    capture = CaptureResult(
-                        samples=iq, config=cfg,
-                        actual_duration=len(iq) / cfg.sample_rate,
-                        num_samples=len(iq),
-                    )
-                    send_spectrum = (frame_count % SPECTRUM_EVERY == 0)
-                    self._process_live_frame(capture, cfg.sample_rate, frame_count, send_spectrum)
-                    frame_count += 1
-
-                sdr.start_stream(on_chunk, chunk_samples)
-
-        except Exception as e:
-            if self._live_active:
-                _emit("live", f"Live error: {e}")
-                logger.error(traceback.format_exc())
-        finally:
-            self._live_active = False
-            self._audio_enabled = False
-            self._live_sdr = None
-            self._live_config = None
-            logger.debug("live loop exited after %d frames", frame_count)
-

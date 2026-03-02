@@ -52,7 +52,7 @@ async def _startup() -> None:
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
-    runner.stop_live()
+    runner.live.stop()
     runner._pool.shutdown(wait=False)
     logger.info("RFSentinel server stopped")
 
