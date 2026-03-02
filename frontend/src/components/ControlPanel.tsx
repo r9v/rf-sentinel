@@ -1,10 +1,14 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { startScan, startLive, retuneLive, stopLive, toggleAudio } from '../api';
 import ModeSelector, { Mode } from './ModeSelector';
 import PresetBar from './PresetBar';
 import ParamSlider from './ParamSlider';
 import FreqInput from './FreqInput';
 import AudioControls, { DemodMode } from './AudioControls';
+
+export interface ControlPanelHandle {
+  goLiveAt: (freq_mhz: number) => void;
+}
 
 interface Props {
   liveActive: boolean;
@@ -40,7 +44,7 @@ function ScanInfo({ bandwidth, numChunks, duration }: { bandwidth: number; numCh
   );
 }
 
-export default function ControlPanel({ liveActive, onLiveToggle, audioEnabled, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange }: Props) {
+export default forwardRef<ControlPanelHandle, Props>(function ControlPanel({ liveActive, onLiveToggle, audioEnabled, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange }, ref) {
   const [mode, setMode] = useState<Mode>('live');
   const [startMhz, setStartMhz] = useState(97.0);
   const [stopMhz, setStopMhz] = useState(99.0);
@@ -95,6 +99,35 @@ export default function ControlPanel({ liveActive, onLiveToggle, audioEnabled, o
     }
   };
 
+  const doStartLive = async (center: number) => {
+    setLoading(true);
+    try {
+      await startLive({
+        start_mhz: +(center - 1.0).toFixed(1),
+        stop_mhz: +(center + 1.0).toFixed(1),
+        gain,
+        audio_enabled: true,
+        demod_mode: demodMode,
+      });
+      onLiveToggle(true);
+      await toggleAudio({ enabled: true, demod_mode: demodMode });
+      onAudioToggle(true);
+    } catch (e) {
+      console.error('Failed to start live:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useImperativeHandle(ref, () => ({
+    goLiveAt(freq_mhz: number) {
+      if (liveActive) return;
+      setMode('live');
+      setCenterMhz(freq_mhz);
+      doStartLive(freq_mhz);
+    },
+  }));
+
   const handleSubmit = async () => {
     if (!canRun) return;
 
@@ -104,23 +137,7 @@ export default function ControlPanel({ liveActive, onLiveToggle, audioEnabled, o
         onLiveToggle(false);
         onAudioToggle(false);
       } else {
-        setLoading(true);
-        try {
-          await startLive({
-            start_mhz: +(centerMhz - 1.0).toFixed(1),
-            stop_mhz: +(centerMhz + 1.0).toFixed(1),
-            gain,
-            audio_enabled: true,
-            demod_mode: demodMode,
-          });
-          onLiveToggle(true);
-          await toggleAudio({ enabled: true, demod_mode: demodMode });
-          onAudioToggle(true);
-        } catch (e) {
-          console.error('Failed to start live:', e);
-        } finally {
-          setLoading(false);
-        }
+        await doStartLive(centerMhz);
       }
       return;
     }
@@ -247,4 +264,4 @@ export default function ControlPanel({ liveActive, onLiveToggle, audioEnabled, o
       />
     </div>
   );
-}
+});

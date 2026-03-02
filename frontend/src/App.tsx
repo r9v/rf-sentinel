@@ -1,18 +1,99 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import { useWebSocket, LogEntry } from './hooks/useWebSocket';
 import { useAudioPlayer } from './hooks/useAudioPlayer';
 import { JobInfo, setVfo, toggleAudio } from './api';
-import ControlPanel from './components/ControlPanel';
+import ControlPanel, { ControlPanelHandle } from './components/ControlPanel';
 import LogConsole from './components/LogConsole';
 import JobList from './components/JobList';
 import ResultView from './components/ResultView';
-import SpectrumChart, { SpectrumFrame, ChartView } from './components/SpectrumChart';
+import SpectrumChart, { SpectrumFrame, ChartView, TYPE_COLORS, TYPE_LABELS } from './components/SpectrumChart';
 import WaterfallCanvas from './components/WaterfallCanvas';
 
 const WS_URL = `ws://${window.location.hostname}:8900/api/ws`;
 const AUDIO_WS_URL = `ws://${window.location.hostname}:8900/api/ws/audio`;
 
+// ── Signal table styles ──────────────────────────────────
+
+const signalRow = 'flex items-center gap-3 px-3 py-1.5 rounded cursor-pointer hover:bg-gray-700/30 transition-colors text-xs font-mono';
+const signalRowActive = 'bg-cyan-500/10 border-l-2 border-cyan-400';
+const sortBtn = 'px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors';
+const sortBtnActive = 'bg-cyan-500/20 text-cyan-300';
+const sortBtnInactive = 'text-gray-600 hover:text-gray-400';
+const sectionToggle = 'flex items-center justify-between w-full px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors uppercase tracking-wider';
 // ── Local components ─────────────────────────────────────
+
+function SignalTable({ peaks, vfoFreq, onFreqClick }: {
+  peaks: SpectrumFrame['peaks'];
+  vfoFreq: number | null;
+  onFreqClick: (freq_mhz: number) => void;
+}) {
+  const [sortBy, setSortBy] = useState<'freq' | 'power'>('freq');
+
+  const sorted = useMemo(() => {
+    const arr = [...peaks];
+    if (sortBy === 'freq') arr.sort((a, b) => a.freq_mhz - b.freq_mhz);
+    else arr.sort((a, b) => b.power_db - a.power_db);
+    return arr;
+  }, [peaks, sortBy]);
+
+  const closestIdx = useMemo(() => {
+    if (vfoFreq == null || sorted.length === 0) return -1;
+    let best = 0;
+    let bestDist = Math.abs(sorted[0].freq_mhz - vfoFreq);
+    for (let i = 1; i < sorted.length; i++) {
+      const d = Math.abs(sorted[i].freq_mhz - vfoFreq);
+      if (d < bestDist) { best = i; bestDist = d; }
+    }
+    return bestDist < 0.1 ? best : -1;
+  }, [sorted, vfoFreq]);
+
+  if (peaks.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-full text-gray-600 text-sm italic font-mono">
+        No signals detected
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-3 px-3 py-1.5 border-b border-gray-700/30 flex-shrink-0">
+        <span className="text-[10px] text-gray-500 uppercase tracking-wider">Sort</span>
+        <div className="flex gap-1">
+          <button onClick={() => setSortBy('freq')}
+            className={`${sortBtn} ${sortBy === 'freq' ? sortBtnActive : sortBtnInactive}`}>
+            Freq
+          </button>
+          <button onClick={() => setSortBy('power')}
+            className={`${sortBtn} ${sortBy === 'power' ? sortBtnActive : sortBtnInactive}`}>
+            Power
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {sorted.map((pk, i) => {
+          const color = (pk.signal_type && TYPE_COLORS[pk.signal_type]) || '#888888';
+          const label = pk.signal_type ? (TYPE_LABELS[pk.signal_type] || '?') : '?';
+          return (
+            <div
+              key={pk.freq_mhz.toFixed(4)}
+              onClick={() => onFreqClick(pk.freq_mhz)}
+              className={`${signalRow} ${i === closestIdx ? signalRowActive : ''}`}
+            >
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold w-8 text-center"
+                style={{ backgroundColor: color + '25', color }}>
+                {label}
+              </span>
+              <span className="text-gray-200 w-24">{pk.freq_mhz.toFixed(3)} MHz</span>
+              <span className="text-gray-400 w-16">{pk.power_db.toFixed(1)} dB</span>
+              <span className="text-gray-600 w-14">{pk.bandwidth_khz.toFixed(0)} kHz</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function Header({ liveActive, audioEnabled, serverOnline }: {
   liveActive: boolean; audioEnabled: boolean; serverOnline: boolean;
@@ -47,7 +128,8 @@ function Header({ liveActive, audioEnabled, serverOnline }: {
   );
 }
 
-function Sidebar({ liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange, jobs, selectedJob, onSelectJob }: {
+function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange, peaks, onPeakClick, jobs, selectedJob, onSelectJob }: {
+  controlPanelRef: React.Ref<ControlPanelHandle>;
   liveActive: boolean;
   audioEnabled: boolean;
   onLiveToggle: (active: boolean) => void;
@@ -55,14 +137,19 @@ function Sidebar({ liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolu
   onVolumeChange: (v: number) => void;
   vfoFreq: number | null;
   onVfoChange: (freq_mhz: number) => void;
+  peaks: SpectrumFrame['peaks'];
+  onPeakClick: (freq_mhz: number) => void;
   jobs: JobInfo[];
   selectedJob: JobInfo | null;
   onSelectJob: (job: JobInfo | null) => void;
 }) {
+  const [signalsOpen, setSignalsOpen] = useState(true);
+
   return (
     <aside className="w-72 border-r border-gray-800 flex flex-col">
       <div className="p-3 border-b border-gray-800/50 flex-shrink-0">
         <ControlPanel
+          ref={controlPanelRef}
           liveActive={liveActive}
           onLiveToggle={onLiveToggle}
           audioEnabled={audioEnabled}
@@ -72,6 +159,17 @@ function Sidebar({ liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolu
           onVfoChange={onVfoChange}
         />
       </div>
+      {peaks.length > 0 && (
+        <div className="border-b border-gray-800/50 flex-shrink-0" style={{ maxHeight: signalsOpen ? '40%' : undefined }}>
+          <button onClick={() => setSignalsOpen(o => !o)} className={sectionToggle}>
+            <span>Signals ({peaks.length})</span>
+            <span className="text-sm text-cyan-400">{signalsOpen ? '▲' : '▼'}</span>
+          </button>
+          {signalsOpen && (
+            <SignalTable peaks={peaks} vfoFreq={vfoFreq} onFreqClick={onPeakClick} />
+          )}
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto p-3">
         <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Jobs</h3>
         <JobList
@@ -121,6 +219,7 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
 
 export default function App() {
   const audio = useAudioPlayer(AUDIO_WS_URL);
+  const controlPanelRef = useRef<ControlPanelHandle>(null);
   const [selectedJob, setSelectedJob] = useState<JobInfo | null>(null);
   const [liveActive, setLiveActive] = useState(false);
   const [liveFrame, setLiveFrame] = useState<SpectrumFrame | null>(null);
@@ -184,11 +283,16 @@ export default function App() {
     }
   }, [audio]);
 
+  const handleScanPeakClick = useCallback((freq_mhz: number) => {
+    controlPanelRef.current?.goLiveAt(freq_mhz);
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#0a0e1a] text-gray-100">
       <Header liveActive={liveActive} audioEnabled={audioEnabled} serverOnline={connected} />
       <div className="flex h-[calc(100vh-45px)]">
         <Sidebar
+          controlPanelRef={controlPanelRef}
           liveActive={liveActive}
           audioEnabled={audioEnabled}
           onLiveToggle={handleLiveToggle}
@@ -196,6 +300,8 @@ export default function App() {
           onVolumeChange={audio.setVolume}
           vfoFreq={vfoFreq}
           onVfoChange={handleFreqClick}
+          peaks={liveActive ? (liveFrame?.peaks || []) : (selectedJob?.status === 'complete' ? selectedJob.params.peaks ?? [] : [])}
+          onPeakClick={liveActive ? handleFreqClick : handleScanPeakClick}
           jobs={jobs}
           selectedJob={selectedJob}
           onSelectJob={setSelectedJob}

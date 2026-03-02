@@ -40,14 +40,14 @@ const PEAK = '#ff6b35';
 const MAX_HOLD_COLOR = 'rgba(255,100,50,0.25)';
 const VFO_COLOR = '#44ff44';
 
-const TYPE_COLORS: Record<string, string> = {
+export const TYPE_COLORS: Record<string, string> = {
   fm_broadcast: '#ff6b35',
   narrowband_fm: '#44aaff',
   digital: '#ff44ff',
   am_broadcast: '#44ff88',
   carrier: '#ffdd44',
 };
-const TYPE_LABELS: Record<string, string> = {
+export const TYPE_LABELS: Record<string, string> = {
   fm_broadcast: 'FM',
   narrowband_fm: 'NFM',
   digital: 'DIG',
