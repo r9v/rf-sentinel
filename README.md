@@ -5,6 +5,7 @@
 RTL-SDR based tool for real-time RF spectrum analysis, signal detection, and automatic classification.
 
 ![RFSentinel scanning the FM broadcast band](showcase1.png)
+![RFSentinel signal detection](showcase2.png)
 
 ## Quick Start
 
