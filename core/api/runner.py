@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gc
 import time
 import uuid
 import logging
@@ -18,6 +17,12 @@ from core.dsp.types import DemodMode
 import numpy as np
 
 logger = logging.getLogger("rfsentinel.runner")
+
+LIVE_PSD_NFFT = 2048
+LIVE_FRAME_DURATION_S = 0.1
+SPECTRUM_SEND_INTERVAL = 5  # send spectrum every N frames
+SCAN_WF_MAX_FREQ_BINS = 1024
+SCAN_WF_MAX_TIME_BINS = 256
 
 
 @dataclass
@@ -93,6 +98,11 @@ class JobRunner:
         self._demod_mode = DemodMode.FM
         self._demod_state = None
         self._vfo_freq_hz: Optional[float] = None
+        self._peak_tracker = None
+        self._psd_smoother = None
+
+    def _reset_dsp_state(self) -> None:
+        self._demod_state = None
         self._peak_tracker = None
         self._psd_smoother = None
 
@@ -189,8 +199,8 @@ class JobRunner:
             spec_power = np.round(result.mean_psd_db, 1).tolist()
 
             # 2D waterfall: decimate more aggressively
-            wf_freq_step = max(1, len(result.freqs_mhz) // 1024)
-            time_step = max(1, result.power_db.shape[1] // 256)
+            wf_freq_step = max(1, len(result.freqs_mhz) // SCAN_WF_MAX_FREQ_BINS)
+            time_step = max(1, result.power_db.shape[1] // SCAN_WF_MAX_TIME_BINS)
             power_ds = result.power_db[::wf_freq_step, ::time_step]
             wf_freqs = np.round(result.freqs_mhz[::wf_freq_step], 4).tolist()
 
@@ -215,7 +225,7 @@ class JobRunner:
             _emit(job.id, f"ERROR: {e}")
             logger.error(traceback.format_exc())
         finally:
-            gc.collect()
+            import gc; gc.collect()
 
     # ── Live mode ────────────────────────────────────────
 
@@ -241,10 +251,8 @@ class JobRunner:
 
         self._audio_enabled = audio_enabled
         self._demod_mode = demod_mode
-        self._demod_state = None
         self._vfo_freq_hz = None
-        self._peak_tracker = None
-        self._psd_smoother = None
+        self._reset_dsp_state()
         self._live_active = True
         self._live_thread = threading.Thread(
             target=self._live_loop,
@@ -292,16 +300,14 @@ class JobRunner:
             center_freq=center_hz, sample_rate=sample_rate,
             gain=gain, duration=0,
         )
-        self._demod_state = None
-        self._peak_tracker = None
-        self._psd_smoother = None
+        self._reset_dsp_state()
         logger.debug("retune: fc=%.3f MHz gain=%.0f dB", center_hz / 1e6, gain)
 
     def toggle_audio(self, enabled: bool, demod_mode: DemodMode = DemodMode.FM) -> None:
         """Toggle audio demod on/off while live is running."""
         self._audio_enabled = enabled
         self._demod_mode = demod_mode
-        self._demod_state = None
+        self._reset_dsp_state()
         state = f"ON ({demod_mode.upper()})" if enabled else "OFF"
         _emit("live", f"Audio {state}")
 
@@ -320,7 +326,7 @@ class JobRunner:
     def set_vfo(self, freq_mhz: float) -> None:
         """Set VFO frequency for audio demod within the captured bandwidth."""
         self._vfo_freq_hz = freq_mhz * 1e6
-        self._demod_state = None
+        self._reset_dsp_state()
         _emit("live", f"VFO → {freq_mhz:.3f} MHz")
 
     def _process_live_frame(self, capture, sample_rate: float,
@@ -365,7 +371,7 @@ class JobRunner:
         from core.dsp.classify import classify_peaks
 
         DOWNSAMPLE_POINTS = 1024
-        result = compute_psd(capture, nfft=2048)
+        result = compute_psd(capture, nfft=LIVE_PSD_NFFT)
 
         if self._psd_smoother is None:
             self._psd_smoother = PsdSmoother()
@@ -401,7 +407,7 @@ class JobRunner:
         """
         from core.sdr import SDRDevice, CaptureConfig, CaptureResult
 
-        SPECTRUM_EVERY = 5
+        SPECTRUM_EVERY = SPECTRUM_SEND_INTERVAL
         frame_count = 0
 
         try:
@@ -412,7 +418,7 @@ class JobRunner:
                     gain=gain, duration=0,
                 )
                 sdr.configure(self._live_config)
-                chunk_samples = int(sample_rate * 0.1)
+                chunk_samples = int(sample_rate * LIVE_FRAME_DURATION_S)
                 def on_chunk(iq):
                     nonlocal frame_count
                     if not self._live_active:

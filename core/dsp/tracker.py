@@ -32,7 +32,7 @@ class TrackedPeak:
 
 def _lookup_power(freq_mhz: float, freqs: np.ndarray, power_db: np.ndarray) -> float:
     """Look up the current power at a frequency from the PSD."""
-    idx = int(np.argmin(np.abs(freqs - freq_mhz)))
+    idx = min(np.searchsorted(freqs, freq_mhz), len(freqs) - 1)
     return float(power_db[idx])
 
 

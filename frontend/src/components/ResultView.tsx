@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { JobInfo } from '../api';
-import SpectrumChart, { ChartView, DualRangeSlider } from './SpectrumChart';
+import SpectrumChart, { ChartView } from './SpectrumChart';
+import DualRangeSlider from './DualRangeSlider';
 import WaterfallCanvas from './WaterfallCanvas';
 
 interface Props {
