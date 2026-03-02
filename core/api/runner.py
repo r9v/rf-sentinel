@@ -93,6 +93,7 @@ class JobRunner:
         self._demod_mode = DemodMode.FM
         self._demod_state = None
         self._vfo_freq_hz: Optional[float] = None
+        self._peak_tracker = None
 
     def _submit_job(self, job_type: str, params: dict, run_fn: Callable) -> Job:
         if self._live_active:
@@ -241,6 +242,7 @@ class JobRunner:
         self._demod_mode = demod_mode
         self._demod_state = None
         self._vfo_freq_hz = None
+        self._peak_tracker = None
         self._live_active = True
         self._live_thread = threading.Thread(
             target=self._live_loop,
@@ -289,6 +291,7 @@ class JobRunner:
             gain=gain, duration=0,
         )
         self._demod_state = None
+        self._peak_tracker = None
         logger.debug("retune: fc=%.3f MHz gain=%.0f dB", center_hz / 1e6, gain)
 
     def toggle_audio(self, enabled: bool, demod_mode: DemodMode = DemodMode.FM) -> None:
@@ -354,6 +357,7 @@ class JobRunner:
         """Compute and send spectrum data over WebSocket."""
         import json
         from core.dsp import compute_psd, find_peaks
+        from core.dsp.tracker import PeakTracker
 
         DOWNSAMPLE_POINTS = 1024
         result = compute_psd(capture, nfft=2048)
@@ -362,16 +366,19 @@ class JobRunner:
         freqs = result.freqs_mhz[::step]
         power = result.power_db[::step]
 
-        peaks = find_peaks(result.freqs_mhz, result.power_db)
+        raw_peaks = find_peaks(result.freqs_mhz, result.power_db)
+        if self._peak_tracker is None:
+            self._peak_tracker = PeakTracker()
+        tracked = self._peak_tracker.update(raw_peaks)
 
         payload = json.dumps({
             "type": "spectrum",
             "freqs_mhz": freqs.tolist(),
             "power_db": power.tolist(),
             "peaks": [
-                {"freq_mhz": pk.freq_mhz, "power_db": pk.power_db,
+                {"freq_mhz": round(pk.freq_mhz, 4), "power_db": pk.power_db,
                  "bandwidth_khz": pk.bandwidth_khz}
-                for pk in peaks
+                for pk in tracked
             ],
         })
 

@@ -14,7 +14,7 @@ class SignalPeak:
     freq_mhz: float
     power_db: float
     prominence_db: float
-    bandwidth_khz: float  # Estimated from peak width at half prominence
+    bandwidth_khz: float
 
 
 def find_peaks(
@@ -36,7 +36,6 @@ def find_peaks(
     Returns:
         List of SignalPeak sorted by power (strongest first).
     """
-    # Convert min_distance from kHz to samples
     freq_step_khz = (freqs_mhz[-1] - freqs_mhz[0]) / (len(freqs_mhz) - 1) * 1000
     min_distance_samples = max(1, int(min_distance_khz / freq_step_khz))
 
@@ -44,14 +43,13 @@ def find_peaks(
         power_db,
         prominence=min_prominence_db,
         distance=min_distance_samples,
-        width=1,  # Get width info
+        width=1,
     )
 
     if len(indices) == 0:
         return []
 
     prominences = properties["prominences"]
-    # Width at half prominence in samples → convert to kHz
     widths = properties["widths"] * freq_step_khz
 
     peaks = [
@@ -64,6 +62,5 @@ def find_peaks(
         for idx, prom, w in zip(indices, prominences, widths)
     ]
 
-    # Sort by power, strongest first, limit
     peaks.sort(key=lambda p: p.power_db, reverse=True)
     return peaks[:max_peaks]
