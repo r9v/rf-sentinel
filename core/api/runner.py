@@ -229,23 +229,16 @@ class JobRunner:
             self._finalize_job(job, t0, peaks)
             _emit(job.id, f"Scan complete ({job.duration_s}s)")
 
-        except CancelledError:
-            job.status = JobStatus.CANCELLED
+        except (CancelledError, Exception) as e:
             job.duration_s = round(time.time() - t0, 2)
-            _emit_job_status(job)
-            _emit(job.id, "Scan cancelled")
-        except Exception as e:
-            if job.cancel.is_set():
+            if isinstance(e, CancelledError) or job.cancel.is_set():
                 job.status = JobStatus.CANCELLED
-                job.duration_s = round(time.time() - t0, 2)
-                _emit_job_status(job)
                 _emit(job.id, "Scan cancelled")
             else:
                 job.status = JobStatus.ERROR
                 job.error = str(e)
-                job.duration_s = round(time.time() - t0, 2)
-                _emit_job_status(job)
                 _emit(job.id, f"ERROR: {e}")
                 logger.error(traceback.format_exc())
+            _emit_job_status(job)
         finally:
             import gc; gc.collect()

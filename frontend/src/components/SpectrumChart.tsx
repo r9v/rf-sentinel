@@ -114,13 +114,12 @@ function peakMarkersPlugin(
         let lastLabelX = -Infinity;
         for (const pk of visible) {
           const x = u.valToPos(pk.freq_mhz, 'x', true);
-          const y = u.valToPos(pk.power_db, 'y', true);
           const color = (pk.signal_type && TYPE_COLORS[pk.signal_type]) || '#888888';
           ctx.fillStyle = color;
 
           const s = 4 * dpr;
+          let markerY: number;
           if (pk.transient) {
-            // Snap to current PSD trace at this frequency
             const freqs = u.data[0] as number[];
             const psd = u.data[1] as number[];
             let psdDb = pk.power_db;
@@ -129,34 +128,26 @@ function peakMarkersPlugin(
               const idx = Math.round((pk.freq_mhz - freqs[0]) / step);
               if (idx >= 0 && idx < psd.length) psdDb = psd[idx];
             }
-            const ty = u.valToPos(psdDb, 'y', true);
+            markerY = u.valToPos(psdDb, 'y', true);
             ctx.beginPath();
-            ctx.arc(x, ty - 5 * dpr, s, 0, Math.PI * 2);
+            ctx.arc(x, markerY - 5 * dpr, s, 0, Math.PI * 2);
             ctx.fill();
-
-            if (x - lastLabelX >= labelGap) {
-              lastLabelX = x;
-              const label = pk.signal_type ? TYPE_LABELS[pk.signal_type] : undefined;
-              ctx.fillText(`${pk.freq_mhz.toFixed(3)}`, x, ty - 11 * dpr);
-              if (label) {
-                ctx.fillText(label, x, ty - 20 * dpr);
-              }
-            }
           } else {
+            markerY = u.valToPos(pk.power_db, 'y', true);
             ctx.beginPath();
-            ctx.moveTo(x, y - 8 * dpr);
-            ctx.lineTo(x - s, y - 2 * dpr);
-            ctx.lineTo(x + s, y - 2 * dpr);
+            ctx.moveTo(x, markerY - 8 * dpr);
+            ctx.lineTo(x - s, markerY - 2 * dpr);
+            ctx.lineTo(x + s, markerY - 2 * dpr);
             ctx.closePath();
             ctx.fill();
+          }
 
-            if (x - lastLabelX >= labelGap) {
-              lastLabelX = x;
-              const label = pk.signal_type ? TYPE_LABELS[pk.signal_type] : undefined;
-              ctx.fillText(`${pk.freq_mhz.toFixed(3)}`, x, y - 11 * dpr);
-              if (label) {
-                ctx.fillText(label, x, y - 20 * dpr);
-              }
+          if (x - lastLabelX >= labelGap) {
+            lastLabelX = x;
+            const label = pk.signal_type ? TYPE_LABELS[pk.signal_type] : undefined;
+            ctx.fillText(`${pk.freq_mhz.toFixed(3)}`, x, markerY - 11 * dpr);
+            if (label) {
+              ctx.fillText(label, x, markerY - 20 * dpr);
             }
           }
         }
