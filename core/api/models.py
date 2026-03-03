@@ -15,12 +15,13 @@ class JobStatus(str, Enum):
     RUNNING = "running"
     COMPLETE = "complete"
     ERROR = "error"
+    CANCELLED = "cancelled"
 
 
 class ScanRequest(BaseModel):
     """Request to start a spectrum + waterfall scan over a frequency range."""
-    start_mhz: float = Field(97.0, ge=24.0, le=1766.0)
-    stop_mhz: float = Field(99.0, ge=24.0, le=1766.0)
+    start_mhz: float = Field(85.0, ge=24.0, le=1766.0)
+    stop_mhz: float = Field(140.0, ge=24.0, le=1766.0)
     duration: float = Field(5.0, ge=0.5, le=30.0)
     gain: float = Field(30.0, ge=0.0, le=50.0)
 

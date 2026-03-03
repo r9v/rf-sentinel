@@ -13,7 +13,7 @@ export interface ChartView {
 export interface SpectrumFrame {
   freqs_mhz: number[];
   power_db: number[];
-  peaks: { freq_mhz: number; power_db: number; bandwidth_khz: number; signal_type?: string; duty_cycle?: number }[];
+  peaks: { freq_mhz: number; power_db: number; bandwidth_khz: number; signal_type?: string; duty_cycle?: number; transient?: boolean }[];
 }
 
 interface Props {
@@ -118,22 +118,45 @@ function peakMarkersPlugin(
           const color = (pk.signal_type && TYPE_COLORS[pk.signal_type]) || '#888888';
           ctx.fillStyle = color;
 
-          // Always draw the triangle marker
           const s = 4 * dpr;
-          ctx.beginPath();
-          ctx.moveTo(x, y - 8 * dpr);
-          ctx.lineTo(x - s, y - 2 * dpr);
-          ctx.lineTo(x + s, y - 2 * dpr);
-          ctx.closePath();
-          ctx.fill();
+          if (pk.transient) {
+            // Snap to current PSD trace at this frequency
+            const freqs = u.data[0] as number[];
+            const psd = u.data[1] as number[];
+            let psdDb = pk.power_db;
+            if (freqs.length > 1) {
+              const step = freqs[1] - freqs[0];
+              const idx = Math.round((pk.freq_mhz - freqs[0]) / step);
+              if (idx >= 0 && idx < psd.length) psdDb = psd[idx];
+            }
+            const ty = u.valToPos(psdDb, 'y', true);
+            ctx.beginPath();
+            ctx.arc(x, ty - 5 * dpr, s, 0, Math.PI * 2);
+            ctx.fill();
 
-          // Only draw text labels when there's enough space
-          if (x - lastLabelX >= labelGap) {
-            lastLabelX = x;
-            const label = pk.signal_type ? TYPE_LABELS[pk.signal_type] : undefined;
-            ctx.fillText(`${pk.freq_mhz.toFixed(3)}`, x, y - 11 * dpr);
-            if (label) {
-              ctx.fillText(label, x, y - 20 * dpr);
+            if (x - lastLabelX >= labelGap) {
+              lastLabelX = x;
+              const label = pk.signal_type ? TYPE_LABELS[pk.signal_type] : undefined;
+              ctx.fillText(`${pk.freq_mhz.toFixed(3)}`, x, ty - 11 * dpr);
+              if (label) {
+                ctx.fillText(label, x, ty - 20 * dpr);
+              }
+            }
+          } else {
+            ctx.beginPath();
+            ctx.moveTo(x, y - 8 * dpr);
+            ctx.lineTo(x - s, y - 2 * dpr);
+            ctx.lineTo(x + s, y - 2 * dpr);
+            ctx.closePath();
+            ctx.fill();
+
+            if (x - lastLabelX >= labelGap) {
+              lastLabelX = x;
+              const label = pk.signal_type ? TYPE_LABELS[pk.signal_type] : undefined;
+              ctx.fillText(`${pk.freq_mhz.toFixed(3)}`, x, y - 11 * dpr);
+              if (label) {
+                ctx.fillText(label, x, y - 20 * dpr);
+              }
             }
           }
         }

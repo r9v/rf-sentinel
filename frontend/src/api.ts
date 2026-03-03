@@ -23,7 +23,7 @@ export interface JobResponse {
 export interface JobInfo {
   id: string;
   type: string;
-  status: 'pending' | 'running' | 'complete' | 'error';
+  status: 'pending' | 'running' | 'complete' | 'error' | 'cancelled';
   params: Record<string, any>;
   error: string | null;
   created_at: string;
@@ -88,6 +88,16 @@ export async function listScans(
 
 export async function getScan(scanId: string): Promise<JobInfo> {
   const res = await fetch(`${API}/api/scans/${scanId}`);
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json();
+}
+
+export async function cancelJob(jobId: string): Promise<{ status: string }> {
+  return (await post(`/api/jobs/${jobId}/cancel`)).json();
+}
+
+export async function deleteScan(scanId: string): Promise<{ status: string }> {
+  const res = await fetch(`${API}/api/scans/${scanId}`, { method: 'DELETE' });
   if (!res.ok) throw new Error(`${res.status}`);
   return res.json();
 }

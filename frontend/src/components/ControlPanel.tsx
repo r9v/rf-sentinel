@@ -46,8 +46,8 @@ function ScanInfo({ bandwidth, numChunks, duration }: { bandwidth: number; numCh
 
 export default forwardRef<ControlPanelHandle, Props>(function ControlPanel({ liveActive, onLiveToggle, audioEnabled, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange }, ref) {
   const [mode, setMode] = useState<Mode>('live');
-  const [startMhz, setStartMhz] = useState(97.0);
-  const [stopMhz, setStopMhz] = useState(99.0);
+  const [startMhz, setStartMhz] = useState(85.0);
+  const [stopMhz, setStopMhz] = useState(140.0);
   const [centerMhz, setCenterMhz] = useState(104.2);
   const [duration, setDuration] = useState(2.0);
   const [gain, setGain] = useState(30.0);

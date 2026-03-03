@@ -256,6 +256,7 @@ def _classify_one(
         "signal_type": signal_type,
         "confidence": round(confidence, 2),
         "band": band_name,
+        "transient": getattr(peak, "transient", False),
     }
     if duty_cycle is not None:
         result["duty_cycle"] = round(duty_cycle, 2)

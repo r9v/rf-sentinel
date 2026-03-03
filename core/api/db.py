@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS signals (
     confidence     REAL,
     band           TEXT,
     duty_cycle     REAL,
+    transient      INTEGER DEFAULT 0,
     created_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_signals_scan_id ON signals(scan_id);
@@ -59,8 +60,16 @@ def init(db_path: Path | None = None) -> None:
     _conn.execute("PRAGMA journal_mode=WAL")
     _conn.execute("PRAGMA foreign_keys=ON")
     _conn.executescript(_SCHEMA)
+    _migrate(_conn)
     _conn.commit()
     logger.info("Database ready: %s", path)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    if "transient" not in cols:
+        conn.execute("ALTER TABLE signals ADD COLUMN transient INTEGER DEFAULT 0")
+        logger.info("Migration: added 'transient' column to signals")
 
 
 def _compress(data: dict) -> bytes:
@@ -97,12 +106,13 @@ def save_scan(job) -> None:
                 """INSERT INTO signals
                    (scan_id, freq_mhz, power_db, prominence_db,
                     bandwidth_khz, signal_type, confidence, band, duty_cycle,
-                    created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    transient, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (job.id, pk["freq_mhz"], pk["power_db"],
                  pk["prominence_db"], pk["bandwidth_khz"],
                  pk.get("signal_type"), pk.get("confidence"),
                  pk.get("band"), pk.get("duty_cycle"),
+                 int(pk.get("transient", False)),
                  job.created_at.isoformat()),
             )
         _conn.commit()
@@ -121,6 +131,18 @@ def list_scans(limit: int = 50, offset: int = 0) -> dict:
         (limit, offset),
     ).fetchall()
     return {"scans": [dict(r) for r in rows], "total": total}
+
+
+def delete_scan(scan_id: str) -> bool:
+    if not _conn:
+        return False
+    with _lock:
+        cur = _conn.execute("DELETE FROM scans WHERE id = ?", (scan_id,))
+        _conn.commit()
+    deleted = cur.rowcount > 0
+    if deleted:
+        logger.info("Deleted scan %s", scan_id[:8])
+    return deleted
 
 
 def get_scan(scan_id: str) -> dict | None:
@@ -143,6 +165,7 @@ def get_scan(scan_id: str) -> dict | None:
         d = dict(s)
         d.pop("id", None)
         d.pop("scan_id", None)
+        d["transient"] = bool(d.get("transient", 0))
         peaks.append(d)
 
     return {

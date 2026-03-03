@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useMemo } from 'react';
 import { useWebSocket, LogEntry } from './hooks/useWebSocket';
 import { useAudioPlayer } from './hooks/useAudioPlayer';
-import { JobInfo, setVfo, toggleAudio, getScan } from './api';
+import { JobInfo, setVfo, toggleAudio, getScan, cancelJob, deleteScan } from './api';
 import ControlPanel, { ControlPanelHandle } from './components/ControlPanel';
 import LogConsole from './components/LogConsole';
 import JobList from './components/JobList';
@@ -20,21 +20,26 @@ const sortBtn = 'px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors
 const sortBtnActive = 'bg-cyan-500/20 text-cyan-300';
 const sortBtnInactive = 'text-gray-600 hover:text-gray-400';
 const sectionToggle = 'flex items-center justify-between w-full px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors uppercase tracking-wider';
+const filterCheck = 'flex items-center gap-1 cursor-pointer text-[10px]';
 // ── Local components ─────────────────────────────────────
 
-function SignalTable({ peaks, vfoFreq, onFreqClick }: {
+function SignalTable({ peaks, vfoFreq, onFreqClick, showSteady, showTransient, onShowSteadyChange, onShowTransientChange }: {
   peaks: SpectrumFrame['peaks'];
   vfoFreq: number | null;
   onFreqClick: (freq_mhz: number) => void;
+  showSteady: boolean;
+  showTransient: boolean;
+  onShowSteadyChange: (v: boolean) => void;
+  onShowTransientChange: (v: boolean) => void;
 }) {
   const [sortBy, setSortBy] = useState<'freq' | 'power'>('freq');
 
   const sorted = useMemo(() => {
-    const arr = [...peaks];
+    const arr = peaks.filter(pk => pk.transient ? showTransient : showSteady);
     if (sortBy === 'freq') arr.sort((a, b) => a.freq_mhz - b.freq_mhz);
     else arr.sort((a, b) => b.power_db - a.power_db);
     return arr;
-  }, [peaks, sortBy]);
+  }, [peaks, sortBy, showSteady, showTransient]);
 
   const closestIdx = useMemo(() => {
     if (vfoFreq == null || sorted.length === 0) return -1;
@@ -69,6 +74,17 @@ function SignalTable({ peaks, vfoFreq, onFreqClick }: {
             Power
           </button>
         </div>
+        <span className="text-gray-700">|</span>
+        <label className={filterCheck}>
+          <input type="checkbox" checked={showSteady} onChange={e => onShowSteadyChange(e.target.checked)}
+            className="accent-cyan-500 w-3 h-3" />
+          <span className={showSteady ? 'text-gray-400' : 'text-gray-600'}>Steady</span>
+        </label>
+        <label className={filterCheck}>
+          <input type="checkbox" checked={showTransient} onChange={e => onShowTransientChange(e.target.checked)}
+            className="accent-amber-500 w-3 h-3" />
+          <span className={showTransient ? 'text-amber-400' : 'text-gray-600'}>Transient</span>
+        </label>
       </div>
       <div className="flex-1 overflow-y-auto">
         {sorted.map((pk, i) => {
@@ -89,6 +105,9 @@ function SignalTable({ peaks, vfoFreq, onFreqClick }: {
               <span className="text-gray-600 w-14">{pk.bandwidth_khz.toFixed(0)} kHz</span>
               {pk.duty_cycle != null && (
                 <span className="text-gray-600 w-10">{(pk.duty_cycle * 100).toFixed(0)}%</span>
+              )}
+              {pk.transient && (
+                <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-400">T</span>
               )}
             </div>
           );
@@ -131,7 +150,7 @@ function Header({ liveActive, audioEnabled, serverOnline }: {
   );
 }
 
-function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange, peaks, onPeakClick, jobs, selectedJob, onSelectJob }: {
+function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange, peaks, onPeakClick, jobs, selectedJob, onSelectJob, onCancelJob, onDeleteScan, showSteady, showTransient, onShowSteadyChange, onShowTransientChange }: {
   controlPanelRef: React.Ref<ControlPanelHandle>;
   liveActive: boolean;
   audioEnabled: boolean;
@@ -145,6 +164,12 @@ function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAu
   jobs: JobInfo[];
   selectedJob: JobInfo | null;
   onSelectJob: (job: JobInfo | null) => void;
+  onCancelJob: (jobId: string) => void;
+  onDeleteScan: (scanId: string) => void;
+  showSteady: boolean;
+  showTransient: boolean;
+  onShowSteadyChange: (v: boolean) => void;
+  onShowTransientChange: (v: boolean) => void;
 }) {
   const [signalsOpen, setSignalsOpen] = useState(true);
 
@@ -169,7 +194,9 @@ function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAu
             <span className="text-sm text-cyan-400">{signalsOpen ? '▲' : '▼'}</span>
           </button>
           {signalsOpen && (
-            <SignalTable peaks={peaks} vfoFreq={vfoFreq} onFreqClick={onPeakClick} />
+            <SignalTable peaks={peaks} vfoFreq={vfoFreq} onFreqClick={onPeakClick}
+              showSteady={showSteady} showTransient={showTransient}
+              onShowSteadyChange={onShowSteadyChange} onShowTransientChange={onShowTransientChange} />
           )}
         </div>
       )}
@@ -179,13 +206,15 @@ function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAu
           jobs={jobs}
           onSelectJob={onSelectJob}
           selectedJobId={selectedJob?.id || null}
+          onCancel={onCancelJob}
+          onDelete={onDeleteScan}
         />
       </div>
     </aside>
   );
 }
 
-function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onClear, vfoFreq, onFreqClick, onScanFreqClick }: {
+function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onClear, vfoFreq, onFreqClick, onScanFreqClick, peakFilter }: {
   liveActive: boolean;
   liveFrame: SpectrumFrame | null;
   selectedJob: JobInfo | null;
@@ -195,6 +224,7 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
   vfoFreq: number | null;
   onFreqClick: (freq_mhz: number) => void;
   onScanFreqClick: (freq_mhz: number) => void;
+  peakFilter: (pk: { transient?: boolean }) => boolean;
 }) {
   const [chartView, setChartView] = useState<ChartView | null>(null);
 
@@ -211,7 +241,7 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
             </div>
           </>
         ) : (
-          <ResultView job={selectedJob} onFreqClick={onScanFreqClick} />
+          <ResultView job={selectedJob} onFreqClick={onScanFreqClick} peakFilter={peakFilter} />
         )}
       </div>
       <LogConsole logs={logs} connected={connected} onClear={onClear} />
@@ -228,6 +258,8 @@ export default function App() {
   const [liveActive, setLiveActive] = useState(false);
   const [liveFrame, setLiveFrame] = useState<SpectrumFrame | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const [showSteady, setShowSteady] = useState(true);
+  const [showTransient, setShowTransient] = useState(true);
   const [vfoFreq, setVfoFreq] = useState<number | null>(null);
   const audioRef = useRef(audio);
   audioRef.current = audio;
@@ -256,6 +288,13 @@ export default function App() {
   }, []);
 
   const { connected, logs, clearLogs, jobs, setJobs } = useWebSocket(WS_URL, handleSpectrum);
+
+  const peakFilter = useCallback((pk: { transient?: boolean }) => pk.transient ? showTransient : showSteady, [showSteady, showTransient]);
+
+  const filteredLiveFrame = useMemo(() => {
+    if (!liveFrame) return null;
+    return { ...liveFrame, peaks: liveFrame.peaks.filter(peakFilter) };
+  }, [liveFrame, peakFilter]);
 
   const handleSelectJob = useCallback(async (job: JobInfo | null) => {
     if (!job) { setSelectedJob(null); return; }
@@ -301,6 +340,17 @@ export default function App() {
     }
   }, [audio]);
 
+  const handleCancelJob = useCallback((jobId: string) => {
+    cancelJob(jobId).catch(() => {});
+  }, []);
+
+  const handleDeleteScan = useCallback((scanId: string) => {
+    deleteScan(scanId).then(() => {
+      setJobs(prev => prev.filter(j => j.id !== scanId));
+      setSelectedJob(prev => prev?.id === scanId ? null : prev);
+    }).catch(() => {});
+  }, [setJobs]);
+
   const handleScanPeakClick = useCallback((freq_mhz: number) => {
     controlPanelRef.current?.goLiveAt(freq_mhz);
   }, []);
@@ -323,10 +373,16 @@ export default function App() {
           jobs={jobs}
           selectedJob={selectedJob}
           onSelectJob={handleSelectJob}
+          onCancelJob={handleCancelJob}
+          onDeleteScan={handleDeleteScan}
+          showSteady={showSteady}
+          showTransient={showTransient}
+          onShowSteadyChange={setShowSteady}
+          onShowTransientChange={setShowTransient}
         />
         <MainContent
           liveActive={liveActive}
-          liveFrame={liveFrame}
+          liveFrame={filteredLiveFrame}
           selectedJob={selectedJob}
           logs={logs}
           connected={connected}
@@ -334,6 +390,7 @@ export default function App() {
           vfoFreq={audioEnabled ? vfoFreq : null}
           onFreqClick={handleFreqClick}
           onScanFreqClick={handleScanPeakClick}
+          peakFilter={peakFilter}
         />
       </div>
     </div>

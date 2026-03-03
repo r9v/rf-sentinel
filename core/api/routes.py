@@ -54,6 +54,12 @@ def create_routes(runner: JobRunner) -> APIRouter:
         runner.live.set_vfo(req.freq_mhz)
         return {"vfo_freq_mhz": req.freq_mhz}
 
+    @router.post("/api/jobs/{job_id}/cancel")
+    async def cancel_job(job_id: str):
+        if runner.cancel_job(job_id):
+            return {"status": "cancelled"}
+        return JSONResponse({"error": "Job not found or not cancellable"}, status_code=404)
+
     @router.get("/api/scans")
     async def get_scan_history(limit: int = 50, offset: int = 0):
         from core.api.db import list_scans
@@ -66,5 +72,13 @@ def create_routes(runner: JobRunner) -> APIRouter:
         if not result:
             return JSONResponse({"error": "Scan not found"}, status_code=404)
         return result
+
+    @router.delete("/api/scans/{scan_id}")
+    async def delete_scan(scan_id: str):
+        from core.api.db import delete_scan as db_delete
+        runner.jobs.pop(scan_id, None)
+        if db_delete(scan_id):
+            return {"status": "deleted"}
+        return JSONResponse({"error": "Scan not found"}, status_code=404)
 
     return router

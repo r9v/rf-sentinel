@@ -7,6 +7,7 @@ import WaterfallCanvas from './WaterfallCanvas';
 interface Props {
   job: JobInfo | null;
   onFreqClick?: (freq_mhz: number) => void;
+  peakFilter?: (pk: { transient?: boolean }) => boolean;
 }
 
 function EmptyState() {
@@ -66,7 +67,7 @@ function JobHeader({ job }: { job: JobInfo }) {
   );
 }
 
-function ScanResult({ job, onFreqClick }: { job: JobInfo; onFreqClick?: (freq_mhz: number) => void }) {
+function ScanResult({ job, onFreqClick, peakFilter }: { job: JobInfo; onFreqClick?: (freq_mhz: number) => void; peakFilter?: (pk: { transient?: boolean }) => boolean }) {
   const [chartView, setChartView] = useState<ChartView | null>(null);
   const [dataDbRange, setDataDbRange] = useState<[number, number]>([-120, -20]);
   const [dbRange, setDbRange] = useState<[number, number] | null>(null);
@@ -87,7 +88,7 @@ function ScanResult({ job, onFreqClick }: { job: JobInfo; onFreqClick?: (freq_mh
   const frame = sd ? {
     freqs_mhz: sd.freqs_mhz,
     power_db: sd.power_db,
-    peaks: job.params.peaks ?? [],
+    peaks: (job.params.peaks ?? []).filter(peakFilter || (() => true)),
   } : null;
 
   const sliderLo = dbRange ? dbRange[0] : dataDbRange[0];
@@ -118,7 +119,7 @@ function ScanResult({ job, onFreqClick }: { job: JobInfo; onFreqClick?: (freq_mh
   );
 }
 
-export default function ResultView({ job, onFreqClick }: Props) {
+export default function ResultView({ job, onFreqClick, peakFilter }: Props) {
   if (!job) return <EmptyState />;
   if (job.status === 'pending' || job.status === 'running') return <LoadingState job={job} />;
   if (job.status === 'error') return <ErrorState job={job} />;
@@ -127,7 +128,7 @@ export default function ResultView({ job, onFreqClick }: Props) {
     <div className="flex flex-col h-full">
       <JobHeader job={job} />
       <div className="flex-1 min-h-0">
-        <ScanResult job={job} onFreqClick={onFreqClick} />
+        <ScanResult job={job} onFreqClick={onFreqClick} peakFilter={peakFilter} />
       </div>
     </div>
   );

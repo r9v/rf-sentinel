@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 import logging
@@ -21,6 +22,10 @@ SCAN_WF_MAX_FREQ_BINS = 1024
 SCAN_WF_MAX_TIME_BINS = 256
 
 
+class CancelledError(Exception):
+    pass
+
+
 @dataclass
 class Job:
     id: str
@@ -30,6 +35,7 @@ class Job:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     error: Optional[str] = None
     duration_s: Optional[float] = None
+    cancel: threading.Event = field(default_factory=threading.Event)
 
 
 # Global callbacks — set by the server to push messages via WebSocket
@@ -88,6 +94,7 @@ class JobRunner:
         self.jobs: dict[str, Job] = {}
         self._pool = ThreadPoolExecutor(max_workers=1)
         self.live = LiveSession(emit=_emit, emit_audio=_emit_audio)
+        self._current_sdr = None
 
     def _submit_job(self, job_type: str, params: dict, run_fn: Callable) -> Job:
         if self.live.active:
@@ -122,19 +129,34 @@ class JobRunner:
 
         segments = []
         with SDRDevice() as sdr:
-            for i, fc in enumerate(centers):
-                _emit(job.id, f"  [{i+1}/{num_chunks}] Capturing {fc/1e6:.1f} MHz...")
-                config = CaptureConfig(
-                    center_freq=fc, sample_rate=SAMPLE_RATE,
-                    duration=p["duration"], gain=p["gain"],
-                )
-                capture = sdr.capture(config)
-                data = compute_fn(capture)
-                if num_chunks > 1:
-                    data = trim_fn(data)
-                segments.append(data)
+            self._current_sdr = sdr
+            try:
+                for i, fc in enumerate(centers):
+                    if job.cancel.is_set():
+                        raise CancelledError()
+                    _emit(job.id, f"  [{i+1}/{num_chunks}] Capturing {fc/1e6:.1f} MHz...")
+                    config = CaptureConfig(
+                        center_freq=fc, sample_rate=SAMPLE_RATE,
+                        duration=p["duration"], gain=p["gain"],
+                    )
+                    capture = sdr.capture(config)
+                    data = compute_fn(capture)
+                    if num_chunks > 1:
+                        data = trim_fn(data)
+                    segments.append(data)
+            finally:
+                self._current_sdr = None
 
         return segments, num_chunks
+
+    def cancel_job(self, job_id: str) -> bool:
+        job = self.jobs.get(job_id)
+        if not job or job.status not in (JobStatus.PENDING, JobStatus.RUNNING):
+            return False
+        job.cancel.set()
+        if self._current_sdr:
+            self._current_sdr.stop_stream()
+        return True
 
     @staticmethod
     def _log_peaks(job_id: str, peaks) -> None:
@@ -207,12 +229,23 @@ class JobRunner:
             self._finalize_job(job, t0, peaks)
             _emit(job.id, f"Scan complete ({job.duration_s}s)")
 
-        except Exception as e:
-            job.status = JobStatus.ERROR
-            job.error = str(e)
+        except CancelledError:
+            job.status = JobStatus.CANCELLED
             job.duration_s = round(time.time() - t0, 2)
             _emit_job_status(job)
-            _emit(job.id, f"ERROR: {e}")
-            logger.error(traceback.format_exc())
+            _emit(job.id, "Scan cancelled")
+        except Exception as e:
+            if job.cancel.is_set():
+                job.status = JobStatus.CANCELLED
+                job.duration_s = round(time.time() - t0, 2)
+                _emit_job_status(job)
+                _emit(job.id, "Scan cancelled")
+            else:
+                job.status = JobStatus.ERROR
+                job.error = str(e)
+                job.duration_s = round(time.time() - t0, 2)
+                _emit_job_status(job)
+                _emit(job.id, f"ERROR: {e}")
+                logger.error(traceback.format_exc())
         finally:
             import gc; gc.collect()

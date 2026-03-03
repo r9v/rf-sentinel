@@ -15,6 +15,7 @@ class SignalPeak:
     power_db: float
     prominence_db: float
     bandwidth_khz: float
+    transient: bool = False
 
 
 NOISE_WINDOW_BINS = 501
@@ -116,32 +117,57 @@ def find_peaks(
 
 
 MERGE_PROXIMITY_KHZ = 50.0
+MAXHOLD_MIN_SNR_DB = 8.0
+MAXHOLD_MIN_DUTY = 0.05  # peak must appear in >=5% of time frames
 
 
 def find_maxhold_peaks(
     freqs_mhz: np.ndarray,
     waterfall_db: np.ndarray,
     existing: list[SignalPeak],
-    min_snr_db: float = MIN_SNR_DB,
+    min_snr_db: float = MAXHOLD_MIN_SNR_DB,
 ) -> list[SignalPeak]:
     """Find peaks in max-hold PSD that aren't already in the existing list.
 
     Catches brief/intermittent transmissions that get averaged out in the
-    mean PSD.  Returns combined list (existing + new max-hold-only peaks).
+    mean PSD.  Validates that each candidate appears above the noise floor
+    in multiple time frames to reject single-frame noise spikes.
+    Returns combined list (existing + new max-hold-only peaks).
     """
-    max_psd = np.max(waterfall_db, axis=1)
-    maxhold_peaks = find_peaks(freqs_mhz, max_psd, min_snr_db=min_snr_db)
+    n_time = waterfall_db.shape[1]
+    if n_time < 2:
+        return existing
 
-    if not maxhold_peaks:
+    max_psd = np.max(waterfall_db, axis=1)
+    candidates = find_peaks(freqs_mhz, max_psd, min_snr_db=min_snr_db)
+
+    if not candidates:
+        return existing
+
+    # Temporal validation: check each candidate has energy in multiple frames
+    noise_floor = _estimate_noise_floor(np.mean(waterfall_db, axis=1))
+    min_frames = max(2, int(n_time * MAXHOLD_MIN_DUTY))
+    validated = []
+    freq_step = float(freqs_mhz[1] - freqs_mhz[0]) if len(freqs_mhz) > 1 else 1.0
+    for pk in candidates:
+        idx = int(round((pk.freq_mhz - freqs_mhz[0]) / freq_step))
+        idx = max(0, min(idx, len(freqs_mhz) - 1))
+        # count frames where this bin exceeds noise + threshold
+        frames_above = int(np.sum(waterfall_db[idx, :] > noise_floor[idx] + MIN_SNR_DB))
+        if frames_above >= min_frames:
+            validated.append(pk)
+
+    if not validated:
         return existing
     if not existing:
-        return maxhold_peaks
+        return validated
 
     existing_freqs = np.array([p.freq_mhz for p in existing])
     merged = list(existing)
-    for pk in maxhold_peaks:
+    for pk in validated:
         dists = np.abs(existing_freqs - pk.freq_mhz) * 1000  # MHz -> kHz
         if np.min(dists) > MERGE_PROXIMITY_KHZ:
+            pk.transient = True
             merged.append(pk)
 
     merged.sort(key=lambda p: p.prominence_db, reverse=True)
