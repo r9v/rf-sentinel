@@ -53,6 +53,12 @@ class VfoRequest(BaseModel):
     freq_mhz: float = Field(..., ge=24.0, le=1766.0, description="VFO frequency in MHz")
 
 
+class RecordStartRequest(BaseModel):
+    """Start IQ recording in live mode."""
+    mode: str = Field(..., pattern="^(wide|narrow)$", description="wide or narrow")
+    bandwidth_khz: Optional[int] = Field(None, description="Bandwidth in kHz (narrow mode)")
+
+
 class JobInfo(BaseModel):
     """Job status response."""
     id: str

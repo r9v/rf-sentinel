@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import traceback
+import uuid
+from datetime import datetime, timezone
 from typing import Callable, Optional
+
+import numpy as np
 
 from core.dsp.types import DemodMode
 
@@ -35,6 +40,11 @@ class LiveSession:
         self._vfo_freq_hz: Optional[float] = None
         self._peak_tracker = None
         self._psd_smoother = None
+        self._rec_mode: Optional[str] = None
+        self._rec_file = None
+        self._rec_meta: dict = {}
+        self._rec_bw: Optional[float] = None
+        self._rec_samples: int = 0
 
     def _reset_dsp_state(self) -> None:
         self._demod_state = None
@@ -84,6 +94,8 @@ class LiveSession:
         self._emit("live", f"Live started: {start_mhz:.1f}–{stop_mhz:.1f} MHz{audio_tag}")
 
     def stop(self) -> None:
+        if self._rec_mode:
+            self.stop_recording()
         self._active = False
         self._audio_enabled = False
         if self._sdr:
@@ -121,9 +133,102 @@ class LiveSession:
         self._emit("live", f"Audio {state}")
 
     def set_vfo(self, freq_mhz: float) -> None:
+        if self._rec_mode == "narrow":
+            self.stop_recording()
         self._vfo_freq_hz = freq_mhz * 1e6
         self._reset_dsp_state()
         self._emit("live", f"VFO → {freq_mhz:.3f} MHz")
+
+    @property
+    def recording(self) -> Optional[str]:
+        return self._rec_mode
+
+    def start_recording(self, mode: str, bandwidth_khz: Optional[int] = None) -> dict:
+        if self._rec_mode:
+            self.stop_recording()
+        if mode == "narrow" and self._vfo_freq_hz is None:
+            raise ValueError("VFO must be set for narrowband recording")
+        if mode == "narrow" and not bandwidth_khz:
+            raise ValueError("bandwidth_khz required for narrowband recording")
+
+        from core.api.db import RECORDINGS_DIR
+        os.makedirs(RECORDINGS_DIR, exist_ok=True)
+
+        rec_id = uuid.uuid4().hex[:12]
+        ts = datetime.now(timezone.utc)
+        ts_str = ts.strftime("%Y%m%d_%H%M%S")
+
+        if mode == "narrow":
+            freq_mhz = self._vfo_freq_hz / 1e6
+            fname = f"{freq_mhz:.3f}MHz_{bandwidth_khz}kHz_{ts_str}.cf32"
+        else:
+            freq_mhz = self._config.center_freq / 1e6 if self._config else 0
+            fname = f"{freq_mhz:.3f}MHz_wide_{ts_str}.cf32"
+
+        filepath = RECORDINGS_DIR / fname
+        self._rec_file = open(filepath, "wb")
+        self._rec_mode = mode
+        self._rec_bw = bandwidth_khz * 1e3 if bandwidth_khz else None
+        self._rec_samples = 0
+        self._rec_meta = {
+            "id": rec_id,
+            "mode": mode,
+            "filename": fname,
+            "freq_mhz": freq_mhz,
+            "bandwidth_khz": bandwidth_khz,
+            "sample_rate": (self._config.sample_rate if self._config else 0),
+            "gain": (self._config.gain if self._config else 0),
+            "start_mhz": 0,
+            "stop_mhz": 0,
+            "created_at": ts.isoformat(),
+        }
+        self._emit("live", f"Recording started: {mode} @ {freq_mhz:.3f} MHz")
+        return {"id": rec_id, "mode": mode, "filename": fname}
+
+    def stop_recording(self) -> Optional[dict]:
+        if not self._rec_mode or not self._rec_file:
+            return None
+        self._rec_file.close()
+
+        from core.api.db import RECORDINGS_DIR, save_recording
+        filepath = RECORDINGS_DIR / self._rec_meta["filename"]
+        file_size = filepath.stat().st_size if filepath.exists() else 0
+
+        stopped_at = datetime.now(timezone.utc)
+        created = datetime.fromisoformat(self._rec_meta["created_at"])
+        duration_s = (stopped_at - created).total_seconds()
+
+        if self._rec_mode == "narrow" and self._rec_bw and self._config:
+            from core.dsp.record import decimate_iq
+            factor = max(1, int(self._config.sample_rate // self._rec_bw))
+            actual_rate = self._config.sample_rate / factor
+        else:
+            actual_rate = self._config.sample_rate if self._config else 0
+
+        meta = {
+            **self._rec_meta,
+            "sample_rate": actual_rate,
+            "num_samples": self._rec_samples,
+            "file_size": file_size,
+            "stopped_at": stopped_at.isoformat(),
+            "duration_s": round(duration_s, 2),
+        }
+        if self._config:
+            bw_mhz = self._config.sample_rate / 1e6
+            center_mhz = self._config.center_freq / 1e6
+            meta["start_mhz"] = round(center_mhz - bw_mhz / 2, 3)
+            meta["stop_mhz"] = round(center_mhz + bw_mhz / 2, 3)
+
+        save_recording(meta)
+        self._emit("live", f"Recording saved: {self._rec_meta['filename']} "
+                   f"({self._rec_samples} samples, {duration_s:.1f}s)")
+
+        self._rec_mode = None
+        self._rec_file = None
+        self._rec_meta = {}
+        self._rec_bw = None
+        self._rec_samples = 0
+        return meta
 
     # ── Internal ──────────────────────────────────────────
 
@@ -132,17 +237,36 @@ class LiveSession:
         from core.dsp import demodulate
         from core.dsp.demod import vfo_shift
 
+        if self._rec_mode == "wide" and self._rec_file:
+            try:
+                data = capture.samples.astype(np.complex64).tobytes()
+                self._rec_file.write(data)
+                self._rec_samples += len(capture.samples)
+            except Exception as e:
+                logger.warning("wideband recording error: %s", e)
+
+        vfo_iq = None
+        if self._vfo_freq_hz is not None and self._config:
+            offset_hz = self._vfo_freq_hz - self._config.center_freq
+            if self._demod_state is None:
+                from core.dsp.demod import DemodState
+                self._demod_state = DemodState()
+            vfo_iq, self._demod_state.vfo_phase = vfo_shift(
+                capture.samples, offset_hz, sample_rate, self._demod_state.vfo_phase,
+            )
+
+        if self._rec_mode == "narrow" and self._rec_file and vfo_iq is not None:
+            try:
+                from core.dsp.record import decimate_iq
+                decimated, _ = decimate_iq(vfo_iq, sample_rate, self._rec_bw)
+                self._rec_file.write(decimated.tobytes())
+                self._rec_samples += len(decimated)
+            except Exception as e:
+                logger.warning("narrowband recording error: %s", e)
+
         if self._audio_enabled:
             try:
-                iq = capture.samples
-                if self._vfo_freq_hz is not None and self._config:
-                    offset_hz = self._vfo_freq_hz - self._config.center_freq
-                    if self._demod_state is None:
-                        from core.dsp.demod import DemodState
-                        self._demod_state = DemodState()
-                    iq, self._demod_state.vfo_phase = vfo_shift(
-                        iq, offset_hz, sample_rate, self._demod_state.vfo_phase,
-                    )
+                iq = vfo_iq if vfo_iq is not None else capture.samples
                 mode = DemodMode(self._demod_mode)
                 pcm, self._demod_state = demodulate(
                     iq, sample_rate, mode, self._demod_state,
@@ -181,6 +305,7 @@ class LiveSession:
             "freqs_mhz": freqs.tolist(),
             "power_db": power.tolist(),
             "peaks": classified,
+            "recording": self._rec_mode,
         })
         self._emit("__spectrum__", payload)
 

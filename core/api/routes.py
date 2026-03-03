@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from core.api.models import ScanRequest, LiveRequest, RetuneRequest, AudioToggleRequest, VfoRequest
+from core.api.models import ScanRequest, LiveRequest, RetuneRequest, AudioToggleRequest, VfoRequest, RecordStartRequest
 from core.api.runner import JobRunner
 
 
@@ -53,6 +53,37 @@ def create_routes(runner: JobRunner) -> APIRouter:
             return JSONResponse({"error": "Live mode is not active"}, status_code=400)
         runner.live.set_vfo(req.freq_mhz)
         return {"vfo_freq_mhz": req.freq_mhz}
+
+    @router.post("/api/live/record/start")
+    async def start_recording(req: RecordStartRequest):
+        if not runner.live.active:
+            return JSONResponse({"error": "Live mode is not active"}, status_code=400)
+        try:
+            result = runner.live.start_recording(req.mode, req.bandwidth_khz)
+            return result
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+    @router.post("/api/live/record/stop")
+    async def stop_recording():
+        if not runner.live.active:
+            return JSONResponse({"error": "Live mode is not active"}, status_code=400)
+        result = runner.live.stop_recording()
+        if not result:
+            return JSONResponse({"error": "Not recording"}, status_code=400)
+        return result
+
+    @router.get("/api/recordings")
+    async def get_recordings(limit: int = 50, offset: int = 0):
+        from core.api.db import list_recordings
+        return list_recordings(limit, offset)
+
+    @router.delete("/api/recordings/{rec_id}")
+    async def delete_recording(rec_id: str):
+        from core.api.db import delete_recording as db_delete_rec
+        if db_delete_rec(rec_id):
+            return {"status": "deleted"}
+        return JSONResponse({"error": "Recording not found"}, status_code=404)
 
     @router.post("/api/jobs/{job_id}/cancel")
     async def cancel_job(job_id: str):

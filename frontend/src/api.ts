@@ -102,3 +102,48 @@ export async function deleteScan(scanId: string): Promise<{ status: string }> {
   return res.json();
 }
 
+// ── Recordings ───────────────────────────────────────
+
+export async function startRecording(
+  mode: 'wide' | 'narrow', bandwidthKhz?: number,
+): Promise<{ id: string; mode: string; filename: string }> {
+  return (await post('/api/live/record/start', {
+    mode, bandwidth_khz: bandwidthKhz,
+  })).json();
+}
+
+export async function stopRecording(): Promise<Record<string, any>> {
+  return (await post('/api/live/record/stop')).json();
+}
+
+export interface RecordingInfo {
+  id: string;
+  mode: string;
+  filename: string;
+  freq_mhz: number;
+  bandwidth_khz: number | null;
+  sample_rate: number;
+  gain: number;
+  start_mhz: number;
+  stop_mhz: number;
+  num_samples: number;
+  file_size: number;
+  created_at: string;
+  stopped_at: string;
+  duration_s: number;
+}
+
+export async function listRecordings(
+  limit = 50, offset = 0,
+): Promise<{ recordings: RecordingInfo[]; total: number }> {
+  const res = await fetch(`${API}/api/recordings?limit=${limit}&offset=${offset}`);
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json();
+}
+
+export async function deleteRecording(recId: string): Promise<{ status: string }> {
+  const res = await fetch(`${API}/api/recordings/${recId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json();
+}
+

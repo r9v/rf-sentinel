@@ -18,6 +18,8 @@ interface Props {
   onVolumeChange: (v: number) => void;
   vfoFreq: number | null;
   onVfoChange: (freq_mhz: number) => void;
+  recording: string | null;
+  onRecord: (mode: 'wide' | 'narrow', bandwidthKhz?: number) => void;
 }
 
 const submitBtn = 'w-full py-2.5 rounded-lg font-medium text-sm transition-all';
@@ -26,6 +28,10 @@ const submitBtnLiveActive = 'bg-red-600 hover:bg-red-500 text-white animate-puls
 const submitBtnLive = 'bg-red-600 hover:bg-red-500 text-white';
 const submitBtnScan = 'bg-cyan-600 hover:bg-cyan-500 text-white glow-accent';
 const sectionToggle = 'flex items-center justify-between w-full text-xs text-gray-400 hover:text-gray-200 transition-colors';
+const recBtn = 'flex-1 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5';
+const recBtnIdle = 'bg-gray-700/50 text-gray-400 hover:bg-gray-600/50 hover:text-gray-200';
+const recBtnActive = 'bg-red-500/20 text-red-300 animate-pulse';
+const NARROW_BW_OPTIONS = [10, 25, 50, 100, 200] as const;
 
 function ScanInfo({ bandwidth, numChunks, duration }: { bandwidth: number; numChunks: number; duration: number }) {
   const formatEst = () => {
@@ -44,7 +50,7 @@ function ScanInfo({ bandwidth, numChunks, duration }: { bandwidth: number; numCh
   );
 }
 
-export default forwardRef<ControlPanelHandle, Props>(function ControlPanel({ liveActive, onLiveToggle, audioEnabled, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange }, ref) {
+export default forwardRef<ControlPanelHandle, Props>(function ControlPanel({ liveActive, onLiveToggle, audioEnabled, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange, recording, onRecord }, ref) {
   const [mode, setMode] = useState<Mode>('live');
   const [startMhz, setStartMhz] = useState(85.0);
   const [stopMhz, setStopMhz] = useState(140.0);
@@ -56,6 +62,7 @@ export default forwardRef<ControlPanelHandle, Props>(function ControlPanel({ liv
   const [demodMode, setDemodMode] = useState<DemodMode>('fm');
   const [presetsOpen, setPresetsOpen] = useState(false);
   const [inputsOpen, setInputsOpen] = useState(true);
+  const [narrowBw, setNarrowBw] = useState<number>(25);
   const lastLiveParams = useRef('');
 
   useEffect(() => {
@@ -262,6 +269,42 @@ export default forwardRef<ControlPanelHandle, Props>(function ControlPanel({ liv
         volume={volume}
         onVolumeChange={handleVolumeChange}
       />
+
+      {liveActive && (
+        <div className="space-y-2">
+          <span className="text-[10px] text-gray-500 uppercase tracking-wider">Recording</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => onRecord('wide')}
+              className={`${recBtn} ${recording === 'wide' ? recBtnActive : recBtnIdle}`}
+            >
+              {recording === 'wide' ? <>● Stop</> : <>Rec Band</>}
+            </button>
+            {vfoFreq != null && (
+              <button
+                onClick={() => onRecord('narrow', narrowBw)}
+                className={`${recBtn} ${recording === 'narrow' ? recBtnActive : recBtnIdle}`}
+              >
+                {recording === 'narrow' ? <>● Stop</> : <>Rec VFO</>}
+              </button>
+            )}
+          </div>
+          {vfoFreq != null && !recording && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-gray-500">BW</span>
+              <select
+                value={narrowBw}
+                onChange={e => setNarrowBw(+e.target.value)}
+                className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:border-cyan-500 focus:outline-none"
+              >
+                {NARROW_BW_OPTIONS.map(bw => (
+                  <option key={bw} value={bw}>{bw} kHz</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 });
