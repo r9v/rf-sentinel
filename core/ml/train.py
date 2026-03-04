@@ -19,6 +19,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, random_split
 
 from .dataset import SignalDataset
+from .features import N_CHANNELS
 from .model import ML_CLASSES, N_CLASSES, SignalCNN
 
 DEFAULT_OUTPUT = os.path.join("data", "models", "classifier.onnx")
@@ -146,7 +147,7 @@ def _print_confusion_matrix(model: nn.Module, val_loader: DataLoader):
 
 def _export_onnx(model: nn.Module, output_path: str):
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    dummy = torch.randn(1, 3, 4096)
+    dummy = torch.randn(1, N_CHANNELS, 4096)
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", "You are using the legacy TorchScript")
         torch.onnx.export(
@@ -169,7 +170,7 @@ def _verify_onnx(model: nn.Module, output_path: str):
         return
 
     session = ort.InferenceSession(output_path, providers=["CPUExecutionProvider"])
-    dummy = np.random.randn(4, 3, 4096).astype(np.float32)
+    dummy = np.random.randn(4, N_CHANNELS, 4096).astype(np.float32)
 
     with torch.no_grad():
         pt_out = model(torch.from_numpy(dummy)).numpy()

@@ -7,6 +7,7 @@ import os
 
 import numpy as np
 
+from .features import iq_to_channels
 from .model import ML_CLASSES
 
 logger = logging.getLogger("rfsentinel.ml")
@@ -22,11 +23,11 @@ def _extract_snippet(
     center_freq_hz: float,
     peak_freq_hz: float,
 ) -> np.ndarray | None:
-    """Extract a (3, N_IQ) float32 tensor for one peak from capture IQ.
+    """Extract a (6, N_IQ) float32 tensor for one peak from capture IQ.
 
     Freq-shifts to center the peak at DC, decimates to ML_SAMPLE_RATE if
-    needed, normalizes to unit power, and builds I/Q/spectrum channels
-    matching the training pipeline in dataset.py.
+    needed, normalizes to unit power, and builds feature channels
+    matching the training pipeline via iq_to_channels().
     """
     offset_hz = peak_freq_hz - center_freq_hz
     if abs(offset_hz) > 1e-3:
@@ -53,16 +54,7 @@ def _extract_snippet(
         return None
     snippet = snippet / np.sqrt(power)
 
-    spectrum = np.fft.fftshift(np.fft.fft(snippet))
-    mag = np.abs(spectrum)
-    log_mag = 10 * np.log10(np.maximum(mag, 1e-12))
-    log_mag = (log_mag - log_mag.mean()) / (log_mag.std() + 1e-8)
-
-    return np.stack([
-        snippet.real.astype(np.float32),
-        snippet.imag.astype(np.float32),
-        log_mag.astype(np.float32),
-    ])  # (3, N_IQ)
+    return iq_to_channels(snippet)
 
 
 class SignalClassifier:
@@ -109,7 +101,7 @@ class SignalClassifier:
             if not tensors:
                 return None
 
-            batch = np.stack(tensors)  # (N, 3, N_IQ)
+            batch = np.stack(tensors)  # (N, 6, N_IQ)
             logits = self._session.run(None, {self._input_name: batch})[0]  # (N, 5)
 
             # Softmax

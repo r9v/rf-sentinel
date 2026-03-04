@@ -1,9 +1,11 @@
 """Synthetic IQ dataset for signal classification training.
 
 Generates realistic modulated signals using numpy/scipy. Each sample is a
-(3, 4096) tensor of I, Q, and log-magnitude spectrum channels at 1.024 MHz
-sample rate (~4 ms), normalized to unit power, with random SNR, frequency
-offset, and phase rotation.
+(6, 4096) tensor at 1.024 MHz sample rate (~4 ms), normalized to unit power,
+with random SNR, frequency offset, and phase rotation.
+
+Channels: I, Q, log-magnitude spectrum, instantaneous frequency,
+amplitude envelope, autocorrelation magnitude.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from .features import iq_to_channels
 from .model import ML_CLASSES, N_CLASSES
 
 SAMPLE_RATE = 1.024e6
@@ -172,13 +175,5 @@ class SignalDataset(Dataset):
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
         iq = self.data[idx]
-        spectrum = np.fft.fftshift(np.fft.fft(iq))
-        mag = np.abs(spectrum)
-        log_mag = np.log10(np.maximum(mag, 1e-12)) * 10  # dB scale
-        log_mag = (log_mag - log_mag.mean()) / (log_mag.std() + 1e-8)
-        tensor = torch.stack([
-            torch.from_numpy(iq.real.copy()),
-            torch.from_numpy(iq.imag.copy()),
-            torch.from_numpy(log_mag.astype(np.float32)),
-        ])  # shape (3, 1024)
-        return tensor, int(self.labels[idx])
+        channels = iq_to_channels(iq)
+        return torch.from_numpy(channels), int(self.labels[idx])

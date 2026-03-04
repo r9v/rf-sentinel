@@ -2,21 +2,23 @@
 
 import torch.nn as nn
 
+from .features import N_CHANNELS
+
 ML_CLASSES = ("fm", "am", "nfm", "digital", "noise")
 N_CLASSES = len(ML_CLASSES)
 
 
 class SignalCNN(nn.Module):
-    """1D CNN on I/Q + power spectrum.
+    """1D CNN on IQ-derived features.
 
-    Input:  (batch, 3, 4096)  — I, Q, log-magnitude spectrum
+    Input:  (batch, 6, 4096)  — I, Q, spectrum, inst freq, amplitude, autocorrelation
     Output: (batch, 5) logits
     """
 
     def __init__(self):
         super().__init__()
         self.features = nn.Sequential(
-            nn.Conv1d(3, 64, kernel_size=7, stride=2, padding=3),
+            nn.Conv1d(N_CHANNELS, 64, kernel_size=7, stride=2, padding=3),
             nn.ReLU(),
             nn.BatchNorm1d(64),
             nn.Conv1d(64, 64, kernel_size=5, stride=2, padding=2),
