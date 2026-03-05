@@ -287,9 +287,9 @@ def _classify_one(
             occ_bw, bw_khz, prominence,
         )
 
-    # Apply band-aware prior
     peak_freq = getattr(peak, "freq_mhz", 0.0)
-    signal_type, confidence, band_name = _apply_band_prior(peak_freq, signal_type, confidence)
+    band = lookup_band(peak_freq)
+    band_name = band.name if band else None
 
     result = {
         "freq_mhz": round(peak_freq, 4),

@@ -19,7 +19,6 @@ const signalRowActive = 'bg-cyan-500/10 border-l-2 border-cyan-400';
 const sortBtn = 'px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors';
 const sortBtnActive = 'bg-cyan-500/20 text-cyan-300';
 const sortBtnInactive = 'text-gray-600 hover:text-gray-400';
-const sectionToggle = 'flex items-center justify-between w-full px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors uppercase tracking-wider';
 const filterCheck = 'flex items-center gap-1 cursor-pointer text-[10px]';
 // ── Local components ─────────────────────────────────────
 
@@ -32,7 +31,7 @@ function SignalTable({ peaks, vfoFreq, onFreqClick, showSteady, showTransient, o
   onShowSteadyChange: (v: boolean) => void;
   onShowTransientChange: (v: boolean) => void;
 }) {
-  const [sortBy, setSortBy] = useState<'freq' | 'power'>('freq');
+  const [sortBy, setSortBy] = useState<'freq' | 'power'>('power');
 
   const sorted = useMemo(() => {
     const arr = peaks.filter(pk => pk.transient ? showTransient : showSteady);
@@ -83,7 +82,7 @@ function SignalTable({ peaks, vfoFreq, onFreqClick, showSteady, showTransient, o
         <label className={filterCheck}>
           <input type="checkbox" checked={showTransient} onChange={e => onShowTransientChange(e.target.checked)}
             className="accent-amber-500 w-3 h-3" />
-          <span className={showTransient ? 'text-amber-400' : 'text-gray-600'}>Transient</span>
+          <span className={showTransient ? 'text-amber-400' : 'text-gray-600'}>Trans</span>
         </label>
       </div>
       <div className="flex-1 overflow-y-auto">
@@ -96,13 +95,13 @@ function SignalTable({ peaks, vfoFreq, onFreqClick, showSteady, showTransient, o
               onClick={() => onFreqClick(pk.freq_mhz)}
               className={`${signalRow} ${i === closestIdx ? signalRowActive : ''}`}
             >
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold w-8 text-center"
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold text-center"
                 style={{ backgroundColor: color + '25', color }}>
-                {label}
+                {label}{pk.confidence != null ? ` ${(pk.confidence * 100).toFixed(0)}%` : ''}
               </span>
-              <span className="text-gray-200 w-24">{pk.freq_mhz.toFixed(3)} MHz</span>
-              <span className="text-gray-400 w-16">{pk.power_db.toFixed(1)} dB</span>
-              <span className="text-gray-600 w-14">{pk.bandwidth_khz.toFixed(0)} kHz</span>
+              <span className="text-gray-200 w-16">{pk.freq_mhz.toFixed(1)} M</span>
+              <span className="text-gray-400 w-14">{pk.power_db.toFixed(1)} dB</span>
+              <span className="text-gray-600 w-12">{pk.bandwidth_khz.toFixed(0)} kHz</span>
               {pk.duty_cycle != null && (
                 <span className="text-gray-600 w-10">{(pk.duty_cycle * 100).toFixed(0)}%</span>
               )}
@@ -155,7 +154,7 @@ function Header({ liveActive, audioEnabled, recording, serverOnline }: {
   );
 }
 
-function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange, peaks, onPeakClick, jobs, selectedJob, onSelectJob, onCancelJob, onDeleteScan, showSteady, showTransient, onShowSteadyChange, onShowTransientChange, recording, onRecord }: {
+function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange, jobs, selectedJob, onSelectJob, onCancelJob, onDeleteScan, recording, onRecord }: {
   controlPanelRef: React.Ref<ControlPanelHandle>;
   liveActive: boolean;
   audioEnabled: boolean;
@@ -164,22 +163,14 @@ function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAu
   onVolumeChange: (v: number) => void;
   vfoFreq: number | null;
   onVfoChange: (freq_mhz: number) => void;
-  peaks: SpectrumFrame['peaks'];
-  onPeakClick: (freq_mhz: number) => void;
   jobs: JobInfo[];
   selectedJob: JobInfo | null;
   onSelectJob: (job: JobInfo | null) => void;
   onCancelJob: (jobId: string) => void;
   onDeleteScan: (scanId: string) => void;
-  showSteady: boolean;
-  showTransient: boolean;
-  onShowSteadyChange: (v: boolean) => void;
-  onShowTransientChange: (v: boolean) => void;
   recording: string | null;
   onRecord: (mode: 'wide' | 'narrow', bandwidthKhz?: number) => void;
 }) {
-  const [signalsOpen, setSignalsOpen] = useState(true);
-
   return (
     <aside className="w-72 border-r border-gray-800 flex flex-col">
       <div className="p-3 border-b border-gray-800/50 flex-shrink-0">
@@ -196,19 +187,6 @@ function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAu
           onRecord={onRecord}
         />
       </div>
-      {peaks.length > 0 && (
-        <div className="border-b border-gray-800/50 flex-shrink-0" style={{ maxHeight: signalsOpen ? '40%' : undefined }}>
-          <button onClick={() => setSignalsOpen(o => !o)} className={sectionToggle}>
-            <span>Signals ({peaks.length})</span>
-            <span className="text-sm text-cyan-400">{signalsOpen ? '▲' : '▼'}</span>
-          </button>
-          {signalsOpen && (
-            <SignalTable peaks={peaks} vfoFreq={vfoFreq} onFreqClick={onPeakClick}
-              showSteady={showSteady} showTransient={showTransient}
-              onShowSteadyChange={onShowSteadyChange} onShowTransientChange={onShowTransientChange} />
-          )}
-        </div>
-      )}
       <div className="flex-1 overflow-y-auto p-3">
         <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Jobs</h3>
         <JobList
@@ -219,6 +197,27 @@ function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAu
           onDelete={onDeleteScan}
         />
       </div>
+    </aside>
+  );
+}
+
+function SignalPanel({ peaks, vfoFreq, onPeakClick, showSteady, showTransient, onShowSteadyChange, onShowTransientChange }: {
+  peaks: SpectrumFrame['peaks'];
+  vfoFreq: number | null;
+  onPeakClick: (freq_mhz: number) => void;
+  showSteady: boolean;
+  showTransient: boolean;
+  onShowSteadyChange: (v: boolean) => void;
+  onShowTransientChange: (v: boolean) => void;
+}) {
+  return (
+    <aside className="w-72 border-l border-gray-800 flex flex-col">
+      <div className="px-3 py-2 border-b border-gray-800/50 flex-shrink-0">
+        <span className="text-xs text-gray-400 uppercase tracking-wider">Signals ({peaks.length})</span>
+      </div>
+      <SignalTable peaks={peaks} vfoFreq={vfoFreq} onFreqClick={onPeakClick}
+        showSteady={showSteady} showTransient={showTransient}
+        onShowSteadyChange={onShowSteadyChange} onShowTransientChange={onShowTransientChange} />
     </aside>
   );
 }
@@ -388,17 +387,11 @@ export default function App() {
           onVolumeChange={audio.setVolume}
           vfoFreq={vfoFreq}
           onVfoChange={handleFreqClick}
-          peaks={liveActive ? (liveFrame?.peaks || []) : (selectedJob?.status === 'complete' ? selectedJob.params.peaks ?? [] : [])}
-          onPeakClick={liveActive ? handleFreqClick : handleScanPeakClick}
           jobs={jobs}
           selectedJob={selectedJob}
           onSelectJob={handleSelectJob}
           onCancelJob={handleCancelJob}
           onDeleteScan={handleDeleteScan}
-          showSteady={showSteady}
-          showTransient={showTransient}
-          onShowSteadyChange={setShowSteady}
-          onShowTransientChange={setShowTransient}
           recording={recording}
           onRecord={handleRecord}
         />
@@ -413,6 +406,15 @@ export default function App() {
           onFreqClick={handleFreqClick}
           onScanFreqClick={handleScanPeakClick}
           peakFilter={peakFilter}
+        />
+        <SignalPanel
+          peaks={liveActive ? (liveFrame?.peaks || []) : (selectedJob?.status === 'complete' ? selectedJob.params.peaks ?? [] : [])}
+          vfoFreq={vfoFreq}
+          onPeakClick={liveActive ? handleFreqClick : handleScanPeakClick}
+          showSteady={showSteady}
+          showTransient={showTransient}
+          onShowSteadyChange={setShowSteady}
+          onShowTransientChange={setShowTransient}
         />
       </div>
     </div>
