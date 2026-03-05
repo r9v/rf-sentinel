@@ -350,6 +350,7 @@ def _parse_classes(classes_str: str) -> set[str]:
 
 
 def generate(
+    per_class: dict[str, int] | None = None,
     samples_per_class: int = 5000,
     impairment_level: int = 2,
     output_path: str = "/data/synthetic.npz",
@@ -359,6 +360,7 @@ def generate(
 ):
     if classes is None:
         classes = set(OUR_CLASSES)
+    counts = {c: per_class.get(c, samples_per_class) for c in classes} if per_class else {c: samples_per_class for c in classes}
 
     rng = np.random.default_rng(seed)
     t0 = time.time()
@@ -366,9 +368,9 @@ def generate(
     requested_torchsig = classes & TORCHSIG_CLASSES
     requested_custom = classes & CUSTOM_CLASSES
 
-    print(f"Generating {samples_per_class} samples/class, "
-          f"impairment_level={impairment_level}, N_IQ={N_IQ}")
-    print(f"Classes: {', '.join(sorted(classes))}")
+    print(f"Generating impairment_level={impairment_level}, N_IQ={N_IQ}")
+    for c in sorted(counts):
+        print(f"  {c}: {counts[c]}")
     if n_workers > 1:
         print(f"Workers: {n_workers}")
 
@@ -380,9 +382,10 @@ def generate(
     if custom_to_gen:
         for pi, cls_name in enumerate(custom_to_gen, 1):
             cls_idx = OUR_CLASSES.index(cls_name)
+            n = counts[cls_name]
             t1 = time.time()
-            print(f"  [{pi}/{len(custom_to_gen)}] Generating {cls_name} ({samples_per_class} samples)...", end="", flush=True)
-            samples = _generate_protocol_samples(cls_name, samples_per_class, rng)
+            print(f"  [{pi}/{len(custom_to_gen)}] Generating {cls_name} ({n} samples)...", end="", flush=True)
+            samples = _generate_protocol_samples(cls_name, n, rng)
             print(f" done ({time.time() - t1:.1f}s)")
             for s in samples:
                 all_iq.append(s)
@@ -390,10 +393,11 @@ def generate(
 
     # 2) Noise (pure numpy)
     if "noise" in requested_custom:
-        print(f"  Generating noise ({samples_per_class} samples)...", end="", flush=True)
+        n = counts["noise"]
+        print(f"  Generating noise ({n} samples)...", end="", flush=True)
         t1 = time.time()
         noise_idx = OUR_CLASSES.index("noise")
-        for _ in range(samples_per_class):
+        for _ in range(n):
             noise = (rng.standard_normal(N_IQ) + 1j * rng.standard_normal(N_IQ)).astype(np.complex64)
             all_iq.append(_unit_power(noise))
             all_labels.append(noise_idx)
@@ -401,7 +405,7 @@ def generate(
 
     # 3) TorchSig classes
     if requested_torchsig:
-        torchsig_targets = {c: samples_per_class for c in requested_torchsig}
+        torchsig_targets = {c: counts[c] for c in requested_torchsig}
         names = ", ".join(sorted(requested_torchsig))
         print(f"  Generating TorchSig classes ({names})...")
         ts_buckets = _generate_torchsig_samples(
@@ -448,7 +452,10 @@ def generate(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate training data (TorchSig + protocol generators)")
-    parser.add_argument("--samples-per-class", type=int, default=5000)
+    parser.add_argument("--samples-per-class", type=int, default=5000,
+                        help="Default samples per class (overridden by --per-class)")
+    parser.add_argument("--per-class", type=str, default=None,
+                        help="Per-class counts: 'fm:20000,am:20000,pocsag:25000,noise:5000'")
     parser.add_argument("--impairment-level", type=int, default=2, choices=[0, 1, 2])
     parser.add_argument("--output", type=str, default="/data/synthetic.npz")
     parser.add_argument("--seed", type=int, default=12345)
@@ -458,11 +465,24 @@ if __name__ == "__main__":
     parser.add_argument("--workers", type=int, default=1,
                         help="Number of parallel TorchSig workers (default: 1)")
     args = parser.parse_args()
+
+    per_class = None
+    if args.per_class:
+        per_class = {}
+        for pair in args.per_class.split(","):
+            name, count = pair.split(":")
+            name = name.strip()
+            if name not in set(OUR_CLASSES):
+                raise ValueError(f"Unknown class: {name!r}")
+            per_class[name] = int(count)
+
+    classes = set(per_class.keys()) if per_class else _parse_classes(args.classes)
     generate(
+        per_class=per_class,
         samples_per_class=args.samples_per_class,
         impairment_level=args.impairment_level,
         output_path=args.output,
         seed=args.seed,
-        classes=_parse_classes(args.classes),
+        classes=classes,
         n_workers=args.workers,
     )
