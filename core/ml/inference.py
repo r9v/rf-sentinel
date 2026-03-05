@@ -170,7 +170,6 @@ class SignalClassifier:
             batch = np.stack(tensors)  # (N, N_CHANNELS, N_IQ)
             logits = self._session.run(None, {self._input_name: batch})[0]
 
-            # Softmax
             shifted = logits - logits.max(axis=1, keepdims=True)
             exp = np.exp(shifted)
             probs = exp / exp.sum(axis=1, keepdims=True)

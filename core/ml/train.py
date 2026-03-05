@@ -20,7 +20,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, Subset
 
-from .dataset import IQDataset
+from .dataset import IQDataset, augment_channels
 from .features import N_CHANNELS, N_IQ
 from .model import ML_CLASSES, N_CLASSES, SignalCNN
 
@@ -199,23 +199,21 @@ def train(
 
 
 class _SubsetWithAugment(torch.utils.data.Dataset):
-    """Subset wrapper that enables augmentation on the underlying IQDataset."""
-
     def __init__(self, dataset: IQDataset, indices: np.ndarray, augment: bool):
         self.dataset = dataset
         self.indices = indices
         self.augment = augment
+        self._rng = np.random.default_rng()
 
     def __len__(self):
         return len(self.indices)
 
     def __getitem__(self, idx):
         real_idx = self.indices[idx]
-        old_augment = self.dataset.augment
-        self.dataset.augment = self.augment
-        item = self.dataset[real_idx]
-        self.dataset.augment = old_augment
-        return item
+        channels = self.dataset.features[real_idx].copy()
+        if self.augment:
+            channels = augment_channels(channels, self._rng)
+        return torch.from_numpy(channels), int(self.dataset.labels[real_idx])
 
 
 def _evaluate_and_print(model: nn.Module, loader: DataLoader, label: str):

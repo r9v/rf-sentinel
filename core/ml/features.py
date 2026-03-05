@@ -79,24 +79,18 @@ def _autocorrelation(iq: np.ndarray) -> np.ndarray:
 def iq_to_channels(iq: np.ndarray, sample_rate: float = ML_SAMPLE_RATE) -> np.ndarray:
     """Convert complex IQ to (N_CHANNELS, N_IQ) float32 feature channels."""
 
-    # --- Bandpass-filtered IQ for time-domain features (100 kHz, no decimation) ---
     filt_iq = _bandpass_filter(iq, 100e3, sample_rate)
 
-    # Ch 0-1: I, Q
-    i_ch = filt_iq.real.astype(np.float32)
-    q_ch = filt_iq.imag.astype(np.float32)
+    i_ch = _normalize(filt_iq.real)
+    q_ch = _normalize(filt_iq.imag)
 
-    # Ch 2: Instantaneous frequency
     phase = np.unwrap(np.angle(filt_iq))
     inst_freq = np.diff(phase)
     inst_freq = np.append(inst_freq, inst_freq[-1])
     inst_freq_norm = _normalize(inst_freq)
 
-    # Ch 3: Amplitude envelope
-    amp = np.abs(filt_iq)
-    amp_norm = _normalize(amp)
+    amp_norm = _normalize(np.abs(filt_iq))
 
-    # Ch 4: Instantaneous frequency variance (sliding window)
     win = _INST_FREQ_VAR_WINDOW
     padded = np.pad(inst_freq, (win // 2, win // 2), mode="edge")
     cumsum = np.cumsum(padded)
@@ -106,15 +100,12 @@ def iq_to_channels(iq: np.ndarray, sample_rate: float = ML_SAMPLE_RATE) -> np.nd
     inst_freq_var = (window_mean2 - window_mean ** 2)[:N_IQ]
     inst_freq_var_norm = _normalize(inst_freq_var)
 
-    # Ch 5: Cyclostationary — FFT of squared magnitude (DC removed)
-    # Use raw IQ (not filtered) so |IQ|² spectrum spans full bandwidth
+    # Cyclostationary uses raw IQ so |IQ|² spectrum spans full bandwidth
     sq_mag = np.abs(iq) ** 2
     sq_mag = sq_mag - sq_mag.mean()
     cyclo = np.fft.fftshift(np.fft.fft(sq_mag, n=N_IQ))
-    cyclo_mag = np.log10(np.maximum(np.abs(cyclo), 1e-12))
-    cyclo_norm = _normalize(cyclo_mag)
+    cyclo_norm = _normalize(np.log10(np.maximum(np.abs(cyclo), 1e-12)))
 
-    # --- Multi-resolution spectrum (decimated IQ → dense FFT) ---
     spec_channels = []
     for bw_hz in _FILTER_BW_HZ:
         if bw_hz is None:
@@ -126,7 +117,6 @@ def iq_to_channels(iq: np.ndarray, sample_rate: float = ML_SAMPLE_RATE) -> np.nd
         else:
             spec_channels.append(_spectrum(_decimate_iq(iq, bw_hz, sample_rate)))
 
-    # --- Autocorrelation: full band + 200 kHz filtered ---
     acf_full = _autocorrelation(iq[:N_IQ] if len(iq) > N_IQ else iq)
     acf_200k = _autocorrelation(_bandpass_filter(iq, 200e3, sample_rate))
 

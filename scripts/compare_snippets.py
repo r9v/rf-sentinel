@@ -15,7 +15,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, ".")
-from core.ml.features import N_CHANNELS, iq_to_channels
+from core.ml.dataset import DATA_CLASSES
+from core.ml.features import N_CHANNELS, N_IQ, iq_to_channels
+from core.ml.model import ML_CLASSES
 
 RESOLUTION_GROUPS = [
     ("Full raw",     [(0, "I"), (1, "Q"), (2, "Inst Freq"), (3, "Amplitude")]),
@@ -24,11 +26,6 @@ RESOLUTION_GROUPS = [
     ("100 kHz",      [(8, "Spectrum")]),
     ("25 kHz",       [(9, "Spectrum")]),
 ]
-
-DATA_CLASSES = (
-    "fm", "am", "ssb", "cw", "nfm", "dmr", "p25", "dstar",
-    "lora", "pocsag", "digital", "noise",
-)
 
 DATASETS = [
     "data/radioml.npz",
@@ -103,9 +100,9 @@ def load_training_samples(npz_path, class_name, n=N_SAMPLES):
     samples = []
     for i in idxs:
         raw = iq_class[i]
-        if len(raw) > 1024:
-            start = (len(raw) - 1024) // 2
-            raw = raw[start:start + 1024]
+        if len(raw) > N_IQ:
+            start = (len(raw) - N_IQ) // 2
+            raw = raw[start:start + N_IQ]
         power = np.mean(np.abs(raw) ** 2)
         if power > 0:
             raw = raw / np.sqrt(power)
@@ -113,14 +110,6 @@ def load_training_samples(npz_path, class_name, n=N_SAMPLES):
         samples.append({"iq": raw, "channels": ch})
     return samples
 
-
-def _plot_resolution_group(axes, row, channels, ch_indices, color):
-    for c, (ch_idx, _name) in enumerate(ch_indices):
-        axes[row, c].plot(channels[ch_idx], linewidth=0.4, color=color)
-        axes[row, c].set_ylim(-5, 5)
-        axes[row, c].tick_params(labelsize=5)
-        if c > 0:
-            axes[row, c].set_yticks([])
 
 
 def _make_figure(sample_rows, title, out_path):
@@ -256,7 +245,7 @@ def main():
 
     os.makedirs(OUT_DIR, exist_ok=True)
 
-    all_classes = ["fm", "am", "ssb", "cw", "nfm", "lora", "pocsag", "digital", "noise"]
+    all_classes = list(ML_CLASSES)
 
     if args.per_data or run_all:
         print("\n=== Per-dataset plots ===")

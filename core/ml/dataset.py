@@ -8,7 +8,7 @@ subsequent access, eliminating per-epoch FFT overhead.
 
 Expected .npz keys:
     iq:     (N, 1024) complex64 — raw IQ samples, unit-power normalized
-    labels: (N,) int64 — class indices matching _DATA_CLASSES order
+    labels: (N,) int64 — class indices matching DATA_CLASSES order
 """
 
 from __future__ import annotations
@@ -28,15 +28,15 @@ CACHE_DIR = os.path.join("data", "cache")
 
 # Class order used when .npz data files were generated (12-class).
 # Samples with classes not in ML_CLASSES are dropped and labels remapped.
-_DATA_CLASSES = (
+DATA_CLASSES = (
     "fm", "am", "ssb", "cw", "nfm", "dmr", "p25", "dstar",
     "lora", "pocsag", "digital", "noise",
 )
 
 
 def _build_label_remap() -> np.ndarray:
-    remap = np.full(len(_DATA_CLASSES), -1, dtype=np.int64)
-    for old_idx, name in enumerate(_DATA_CLASSES):
+    remap = np.full(len(DATA_CLASSES), -1, dtype=np.int64)
+    for old_idx, name in enumerate(DATA_CLASSES):
         if name in ML_CLASSES:
             remap[old_idx] = ML_CLASSES.index(name)
     return remap

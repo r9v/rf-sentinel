@@ -119,7 +119,7 @@ def _add_noise(iq: np.ndarray, snr_db: float, rng: np.random.Generator) -> np.nd
     return iq + noise
 
 
-def _normalize(iq: np.ndarray) -> np.ndarray:
+def _unit_power(iq: np.ndarray) -> np.ndarray:
     power = np.mean(np.abs(iq) ** 2)
     if power < 1e-12:
         return iq
@@ -139,7 +139,7 @@ def _augment(iq: np.ndarray, rng: np.random.Generator,
     iq = _add_noise(iq, snr_db, rng)
     iq = _freq_shift(iq, rng.uniform(-SAMPLE_RATE * 0.05, SAMPLE_RATE * 0.05))
     iq = iq * np.exp(1j * rng.uniform(0, 2 * np.pi))
-    return _normalize(iq)
+    return _unit_power(iq)
 
 
 def gen_cw(rng: np.random.Generator) -> np.ndarray:
@@ -315,7 +315,7 @@ def _torchsig_worker(
         elif len(iq) < N_IQ:
             continue
 
-        buckets[cls_idx].append(_normalize(iq))
+        buckets[cls_idx].append(_unit_power(iq))
         kept += 1
 
         if kept - last_log >= 500:
@@ -456,7 +456,7 @@ def generate(
         noise_idx = OUR_CLASSES.index("noise")
         for _ in range(samples_per_class):
             noise = (rng.standard_normal(N_IQ) + 1j * rng.standard_normal(N_IQ)).astype(np.complex64)
-            all_iq.append(_normalize(noise))
+            all_iq.append(_unit_power(noise))
             all_labels.append(noise_idx)
         print(f" done ({time.time() - t1:.1f}s)")
 

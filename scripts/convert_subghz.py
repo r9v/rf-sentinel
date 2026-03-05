@@ -20,9 +20,8 @@ import numpy as np
 import scipy.io
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core.ml.features import N_IQ
 from core.ml.model import ML_CLASSES
-
-N_IQ = 1024
 
 CLASS_MAP = {
     "lorasf7": "lora",
@@ -97,7 +96,6 @@ def main():
         # Map flat indices to (chunk_idx, offset) without full concatenation
         sampled_list = []
         offset = 0
-        ci = 0
         for chunk in chunks:
             in_chunk = chosen[(chosen >= offset) & (chosen < offset + len(chunk))] - offset
             if len(in_chunk) > 0:
@@ -112,7 +110,6 @@ def main():
     iq = np.concatenate(all_iq)
     labels = np.concatenate(all_labels)
 
-    # Shuffle everything together
     rng = np.random.default_rng(123)
     perm = rng.permutation(len(iq))
     iq = iq[perm]
