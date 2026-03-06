@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
 import threading
 import traceback
 import uuid
@@ -45,6 +46,8 @@ class LiveSession:
         self._rec_meta: dict = {}
         self._rec_bw: Optional[float] = None
         self._rec_samples: int = 0
+        self._spectrum_queue: queue.Queue | None = None
+        self._spectrum_thread: threading.Thread | None = None
 
     def _reset_dsp_state(self) -> None:
         self._demod_state = None
@@ -79,8 +82,6 @@ class LiveSession:
         if self._active:
             self.stop()
         center_hz, sample_rate, start_mhz, stop_mhz = self._compute_params(start_mhz, stop_mhz)
-        logger.debug("start: %.1f–%.1f MHz center=%.3f MHz sr=%.0f gain=%.0f",
-                     start_mhz, stop_mhz, center_hz / 1e6, sample_rate, gain)
         self._audio_enabled = audio_enabled
         self._demod_mode = demod_mode
         self._vfo_freq_hz = None
@@ -111,29 +112,26 @@ class LiveSession:
 
     def retune(self, start_mhz: float, stop_mhz: float, gain: float) -> None:
         if not self._active or not self._sdr:
-            logger.debug("retune: skipped (active=%s sdr=%s)", self._active, self._sdr is not None)
             return
         from core.sdr import CaptureConfig
         center_hz, sample_rate, start_mhz, stop_mhz = self._compute_params(start_mhz, stop_mhz)
         if self._config and sample_rate != self._config.sample_rate:
-            logger.debug("retune: sample rate changed %.0f→%.0f, restarting",
-                         self._config.sample_rate, sample_rate)
             audio = self._audio_enabled
             demod = self._demod_mode
             self.stop()
             self.start(start_mhz, stop_mhz, gain, audio, demod)
             return
-        old_fc = self._config.center_freq / 1e6 if self._config else 0
-        old_gain = self._config.gain if self._config else 0
-        logger.debug("retune: fc=%.3f→%.3f MHz gain=%.0f→%.0f dB",
-                     old_fc, center_hz / 1e6, old_gain, gain)
-        self._sdr.retune(center_hz, gain)
+        try:
+            self._sdr.retune(center_hz, gain)
+        except Exception as e:
+            logger.error("retune failed: %s", e)
+            self._emit("live", f"Retune error: {e}")
+            return
         self._config = CaptureConfig(
             center_freq=center_hz, sample_rate=sample_rate,
             gain=gain, duration=0,
         )
         self._reset_dsp_state()
-        logger.debug("retune: OK")
 
     def toggle_audio(self, enabled: bool, demod_mode: DemodMode = DemodMode.FM) -> None:
         self._audio_enabled = enabled
@@ -145,14 +143,8 @@ class LiveSession:
     def set_vfo(self, freq_mhz: float) -> None:
         if self._rec_mode == "narrow":
             self.stop_recording()
-        old_vfo = self._vfo_freq_hz
         self._vfo_freq_hz = freq_mhz * 1e6
         self._reset_dsp_state()
-        offset_khz = 0.0
-        if self._config:
-            offset_khz = (self._vfo_freq_hz - self._config.center_freq) / 1e3
-        logger.debug("VFO: %s → %.3f MHz (offset %.1f kHz from center)",
-                     f"{old_vfo/1e6:.3f}" if old_vfo else "none", freq_mhz, offset_khz)
         self._emit("live", f"VFO → {freq_mhz:.3f} MHz")
 
     @property
@@ -248,6 +240,19 @@ class LiveSession:
 
     # ── Internal ──────────────────────────────────────────
 
+    def _spectrum_worker(self) -> None:
+        while self._active:
+            try:
+                capture = self._spectrum_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if capture is None:
+                break
+            try:
+                self._send_spectrum(capture)
+            except Exception as e:
+                logger.warning("spectrum worker error: %s", e)
+
     def _process_frame(self, capture, sample_rate: float,
                        frame_count: int, send_spectrum: bool) -> None:
         from core.dsp import demodulate
@@ -294,8 +299,11 @@ class LiveSession:
             except Exception as e:
                 logger.warning("audio demod error frame %d: %s", frame_count, e)
 
-        if send_spectrum:
-            self._send_spectrum(capture)
+        if send_spectrum and self._spectrum_queue is not None:
+            try:
+                self._spectrum_queue.put_nowait(capture)
+            except queue.Full:
+                pass
 
     def _send_spectrum(self, capture) -> None:
         from core.dsp import compute_psd, find_peaks
@@ -347,8 +355,12 @@ class LiveSession:
                 )
                 sdr.configure(self._config)
                 chunk_samples = int(sample_rate * LIVE_FRAME_DURATION_S)
-                logger.debug("stream start: fc=%.3f MHz sr=%.0f chunk=%d",
-                             center_hz / 1e6, sample_rate, chunk_samples)
+
+                self._spectrum_queue = queue.Queue(maxsize=1)
+                self._spectrum_thread = threading.Thread(
+                    target=self._spectrum_worker, daemon=True,
+                )
+                self._spectrum_thread.start()
 
                 def on_chunk(iq):
                     nonlocal frame_count
@@ -373,6 +385,11 @@ class LiveSession:
         finally:
             self._active = False
             self._audio_enabled = False
+            if self._spectrum_queue:
+                self._spectrum_queue.put(None)
+            if self._spectrum_thread:
+                self._spectrum_thread.join(timeout=2)
+                self._spectrum_thread = None
+            self._spectrum_queue = None
             self._sdr = None
             self._config = None
-            logger.debug("live loop exited after %d frames", frame_count)

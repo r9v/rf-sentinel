@@ -10,9 +10,6 @@ logging.basicConfig(
     format="%(asctime)s.%(msecs)03d %(levelname)-5s [%(name)s] %(message)s",
     datefmt="%H:%M:%S",
 )
-logging.getLogger("rfsentinel.runner").setLevel(logging.DEBUG)
-logging.getLogger("rfsentinel.routes").setLevel(logging.DEBUG)
-logging.getLogger("core.sdr").setLevel(logging.DEBUG)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

@@ -71,8 +71,6 @@ class SDRDevice:
         if config_key == self._last_config_key:
             return
 
-        log.debug("SDR reconfig: sr=%.0f fc=%.0f gain=%.0f",
-                  config.sample_rate, config.center_freq, config.gain)
         try:
             self._sdr.sample_rate = config.sample_rate
             self._sdr.center_freq = config.center_freq
@@ -179,6 +177,7 @@ class SDRDevice:
             self._sdr.center_freq = center_freq
             self._sdr.gain = gain
         except Exception as exc:
+            log.error("retune: I2C failed at %.1f MHz: %s", center_freq / 1e6, exc)
             self._last_config_key = None
             raise RuntimeError(
                 f"I2C write failed during retune (freq={center_freq/1e6:.1f} MHz, "

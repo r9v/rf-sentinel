@@ -278,6 +278,8 @@ export default function App() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const audioRef = useRef(audio);
   audioRef.current = audio;
+  const vfoRef = useRef<number | null>(null);
+  vfoRef.current = vfoFreq;
 
   useEffect(() => {
     listBookmarks().then(setBookmarks).catch(() => {});
@@ -292,19 +294,18 @@ export default function App() {
     });
     setRecording(data.recording ?? null);
     const center = (freqs[0] + freqs[freqs.length - 1]) / 2;
-    setVfoFreq(prev => {
-      if (prev != null) {
-        if (prev < freqs[0] || prev > freqs[freqs.length - 1]) {
-          setAudioEnabled(false);
-          audioRef.current.stop();
-          setVfo(center).catch(() => setVfoFreq(null));
-          return center;
-        }
-        return prev;
+    const prev = vfoRef.current;
+    if (prev != null) {
+      if (prev < freqs[0] || prev > freqs[freqs.length - 1]) {
+        setAudioEnabled(false);
+        audioRef.current.stop();
+        setVfoFreq(center);
+        setVfo(center).catch(() => setVfoFreq(null));
       }
+    } else {
+      setVfoFreq(center);
       setVfo(center).catch(() => setVfoFreq(null));
-      return center;
-    });
+    }
   }, []);
 
   const { connected, logs, clearLogs, jobs, setJobs } = useWebSocket(WS_URL, handleSpectrum);

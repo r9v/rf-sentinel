@@ -6,6 +6,7 @@ Coding preferences for this project.
 
 - Delete dead code rather than leaving it around (e.g. obsolete CLI modules, unused functions).
 - Don't add comments unless the logic is genuinely non-obvious.
+- IMPORTANT: When investigating a bug, first add logs to confirm the issue before jumping into a fix. Don't assume the root cause — verify it with evidence.
 
 ## File organisation
 
@@ -29,6 +30,10 @@ Coding preferences for this project.
 ## Python
 
 - Pure data-transform functions (e.g. `downsample_2d`) belong in `dsp/`, not in plotting or runner.
+
+## Debugging
+
+- This is IMPORTANT so repeating again: When investigating a bug, first add logs to confirm the issue before jumping into a fix. Don't assume the root cause — verify it with evidence.
 
 ## Git
 
