@@ -1,6 +1,6 @@
 """Shared feature extraction for training and inference.
 
-15 channels total:
+16 channels total:
   Time-domain (from 100 kHz bandpass-filtered IQ):
     0: I
     1: Q
@@ -11,15 +11,16 @@
   Multi-resolution spectrum (decimated IQ → FFT):
     6:  Full band (1.024 MHz)
     7:  200 kHz decimated
-    8:  100 kHz decimated
+    8:  Spectral delta — |spectrum(first half) - spectrum(second half)|, high for chirps
     9:  25 kHz decimated
   Autocorrelation (bandpass-filtered IQ → ACF):
     10: Full band
     11: 200 kHz filtered
-  AM/SSB/FM discrimination:
-    12: Spectral symmetry — |S(peak+k) - S(peak-k)|, low for AM, high for SSB
+  Modulation discrimination:
+    12: Inst freq ACF — autocorrelation of inst freq, periodic peaks for LoRa/TDMA
     13: Envelope variance — sliding window variance of |IQ| (low for FM/NFM)
-    14: Bandwidth CDF — cumulative energy from spectral peak outward
+    14: Inst freq histogram — PMF of inst freq, Gaussian for FM, spikes for TDMA, flat for LoRa
+    15: Sliding PAPR — peak-to-average power ratio in windows, low for FM/LoRa, high for OFDM/TDMA
 """
 
 from __future__ import annotations
@@ -27,12 +28,12 @@ from __future__ import annotations
 import numpy as np
 from scipy.signal import decimate as sp_decimate
 
-N_CHANNELS = 15
+N_CHANNELS = 16
 N_IQ = 1024
 
 ML_SAMPLE_RATE = 1.024e6
 
-_FILTER_BW_HZ = (None, 200e3, 100e3, 25e3)
+_FILTER_BW_HZ = (None, 200e3, 25e3)
 
 _INST_FREQ_VAR_WINDOW = 32
 
@@ -80,14 +81,16 @@ def _autocorrelation(iq: np.ndarray) -> np.ndarray:
     return _normalize(acf)
 
 
-def _spectral_symmetry(iq: np.ndarray) -> np.ndarray:
-    S = np.abs(np.fft.fftshift(np.fft.fft(iq, n=N_IQ)))
-    peak = int(np.argmax(S))
-    max_r = min(peak, N_IQ - 1 - peak)
-    sym = np.zeros(N_IQ, dtype=np.float32)
-    for k in range(1, max_r + 1):
-        sym[k] = abs(S[peak + k] - S[peak - k])
-    return _normalize(sym)
+def _spectral_delta(iq: np.ndarray) -> np.ndarray:
+    """Spectrum difference between first and second half of the signal.
+
+    Chirps (LoRa) sweep frequency over time → large delta.
+    Stationary signals (OFDM, FM) → near zero.
+    """
+    half = N_IQ // 2
+    s1 = np.abs(np.fft.fftshift(np.fft.fft(iq[:half], n=N_IQ)))
+    s2 = np.abs(np.fft.fftshift(np.fft.fft(iq[half:2 * half], n=N_IQ)))
+    return _normalize(np.abs(s1 - s2))
 
 
 def _envelope_variance(iq: np.ndarray, win: int = _INST_FREQ_VAR_WINDOW) -> np.ndarray:
@@ -101,19 +104,68 @@ def _envelope_variance(iq: np.ndarray, win: int = _INST_FREQ_VAR_WINDOW) -> np.n
     return _normalize(var)
 
 
-def _bandwidth_cdf(iq: np.ndarray) -> np.ndarray:
-    S = np.abs(np.fft.fftshift(np.fft.fft(iq, n=N_IQ))) ** 2
-    peak = int(np.argmax(S))
-    max_r = min(peak, N_IQ - 1 - peak)
-    cdf = np.zeros(N_IQ, dtype=np.float32)
-    total = S.sum() + 1e-12
-    cumul = S[peak]
-    cdf[0] = cumul / total
-    for k in range(1, max_r + 1):
-        cumul += S[peak + k] + S[peak - k]
-        cdf[k] = cumul / total
-    cdf[max_r + 1:] = 1.0
-    return cdf
+_HIST_BINS = 128
+
+
+def _ifreq_acf(inst_freq: np.ndarray) -> np.ndarray:
+    """Autocorrelation of instantaneous frequency — captures temporal periodicity.
+
+    LoRa: strong periodic peaks (repeating chirps).
+    TDMA: periodic structure at symbol/slot rate.
+    FM/NFM: smooth decay (continuous modulation).
+    OFDM: flat (random subcarrier phases).
+    """
+    vals = inst_freq[:N_IQ] if len(inst_freq) > N_IQ else inst_freq
+    if len(vals) < N_IQ:
+        vals = np.pad(vals, (0, N_IQ - len(vals)), mode="constant")
+    X = np.fft.fft(vals, n=N_IQ)
+    acf = np.fft.fftshift(np.abs(np.fft.ifft(X * np.conj(X))))
+    return _normalize(acf)
+
+
+def _ifreq_hist(inst_freq: np.ndarray) -> np.ndarray:
+    """Instantaneous frequency distribution histogram (PMF interpolated to N_IQ).
+
+    FM/NFM: Gaussian centered at carrier offset. TDMA: discrete spikes at symbol points.
+    LoRa: flat rectangle (linear chirp sweep). Noise: wide uniform.
+    """
+    vals = inst_freq[:N_IQ] if len(inst_freq) > N_IQ else inst_freq
+    if len(vals) < N_IQ:
+        vals = np.pad(vals, (0, N_IQ - len(vals)), mode="constant")
+    hist, _ = np.histogram(vals, bins=_HIST_BINS)
+    hist = hist / (hist.sum() + 1e-8)
+    x_old = np.linspace(0, 1, _HIST_BINS)
+    x_new = np.linspace(0, 1, N_IQ)
+    return np.interp(x_new, x_old, hist).astype(np.float32)
+
+
+_PAPR_WINDOW = 32
+
+
+def _papr_hist(iq: np.ndarray, win: int = _PAPR_WINDOW) -> np.ndarray:
+    """Histogram of sliding-window PAPR values (PMF interpolated to N_IQ).
+
+    FM/NFM: spike at 0 dB (constant envelope).
+    OFDM: spread 3–10 dB (high PAPR, variable).
+    TDMA: bimodal (low idle, high burst).
+    LoRa: low spike (constant-envelope chirp).
+    AM: moderate spread (varying envelope).
+    """
+    raw = iq[:N_IQ] if len(iq) > N_IQ else iq
+    if len(raw) < N_IQ:
+        raw = np.pad(raw, (0, N_IQ - len(raw)), mode="constant")
+    power = np.abs(raw) ** 2
+    padded = np.pad(power, (win // 2, win // 2), mode="edge")
+    windows = np.lib.stride_tricks.sliding_window_view(padded, win)
+    peak = windows.max(axis=1)[:N_IQ]
+    avg = windows.mean(axis=1)[:N_IQ]
+    papr = peak / np.maximum(avg, 1e-12)
+    papr_db = 10 * np.log10(np.maximum(papr, 1.0))
+    hist, _ = np.histogram(papr_db, bins=_HIST_BINS, range=(0, 15))
+    hist = hist / (hist.sum() + 1e-8)
+    x_old = np.linspace(0, 1, _HIST_BINS)
+    x_new = np.linspace(0, 1, N_IQ)
+    return np.interp(x_new, x_old, hist).astype(np.float32)
 
 
 def iq_to_channels(iq: np.ndarray, sample_rate: float = ML_SAMPLE_RATE) -> np.ndarray:
@@ -146,23 +198,21 @@ def iq_to_channels(iq: np.ndarray, sample_rate: float = ML_SAMPLE_RATE) -> np.nd
     cyclo = np.fft.fftshift(np.fft.fft(sq_mag, n=N_IQ))
     cyclo_norm = _normalize(np.log10(np.maximum(np.abs(cyclo), 1e-12)))
 
-    spec_channels = []
-    for bw_hz in _FILTER_BW_HZ:
-        if bw_hz is None:
-            raw_iq = iq
-            if len(raw_iq) > N_IQ:
-                s = (len(raw_iq) - N_IQ) // 2
-                raw_iq = raw_iq[s:s + N_IQ]
-            spec_channels.append(_spectrum(raw_iq))
-        else:
-            spec_channels.append(_spectrum(_decimate_iq(iq, bw_hz, sample_rate)))
+    raw_iq = iq[:N_IQ] if len(iq) > N_IQ else iq
 
-    acf_full = _autocorrelation(iq[:N_IQ] if len(iq) > N_IQ else iq)
+    spec_channels = [_spectrum(raw_iq)]
+    for bw_hz in _FILTER_BW_HZ[1:]:
+        spec_channels.append(_spectrum(_decimate_iq(iq, bw_hz, sample_rate)))
+
+    spec_delta = _spectral_delta(raw_iq)
+
+    acf_full = _autocorrelation(raw_iq)
     acf_200k = _autocorrelation(_bandpass_filter(iq, 200e3, sample_rate))
 
-    spec_sym = _spectral_symmetry(iq)
+    ifreq_acf = _ifreq_acf(inst_freq)
     env_var = _envelope_variance(iq)
-    bw_cdf = _bandwidth_cdf(iq)
+    ifreq_hist = _ifreq_hist(inst_freq)
+    papr = _papr_hist(filt_iq)
 
     return np.stack([
         i_ch, q_ch,
@@ -170,10 +220,14 @@ def iq_to_channels(iq: np.ndarray, sample_rate: float = ML_SAMPLE_RATE) -> np.nd
         amp_norm,
         inst_freq_var_norm,
         cyclo_norm,
-        *spec_channels,
+        spec_channels[0],   # ch6: full band 1.024 MHz
+        spec_channels[1],   # ch7: 200 kHz
+        spec_delta,          # ch8: spectral delta
+        spec_channels[2],   # ch9: 25 kHz
         acf_full,
         acf_200k,
-        spec_sym,
+        ifreq_acf,           # ch12: inst freq autocorrelation
         env_var,
-        bw_cdf,
+        ifreq_hist,          # ch14: inst freq histogram
+        papr,                # ch15: sliding-window PAPR
     ])

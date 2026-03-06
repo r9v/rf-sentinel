@@ -1,8 +1,12 @@
 """Compare raw IQ properties between training data and live SDR captures.
 
 Usage:
-    python -m scripts.compare_data --training data/radioml.npz data/subghz.npz data/synthetic.npz \
-        --live data/debug/fm data/debug/digital data/debug/noise
+    python -m scripts.compare_data --training data/radioml.npz data/synthetic.npz \
+        --live data/debug/fm data/debug/noise
+
+    # Feature-level similarity (per-channel cosine similarity matrix):
+    python -m scripts.compare_data --features --training data/radioml.npz data/synthetic.npz \
+        --live data/debug/fm data/debug/noise
 """
 
 from __future__ import annotations
@@ -12,7 +16,9 @@ import glob
 import os
 
 import numpy as np
+from numpy.linalg import norm
 
+from core.ml.features import N_CHANNELS, N_IQ, iq_to_channels
 from core.ml.model import ML_CLASSES, N_CLASSES
 
 
@@ -91,7 +97,7 @@ def load_live(debug_dirs: list[str]) -> dict[str, list[np.ndarray]]:
     for d in debug_dirs:
         if not os.path.isdir(d):
             continue
-        class_name = os.path.basename(d)
+        class_name = os.path.basename(d).lower()
         files = sorted(glob.glob(os.path.join(d, "*.npz")))
         if not files:
             continue
@@ -195,23 +201,133 @@ def print_comparison(training: dict[str, list[np.ndarray]], live: dict[str, list
     print("  - kurtosis:        Amplitude distribution shape differences")
 
 
+CH_NAMES = [
+    "I", "Q", "instfreq", "amp", "ifvar", "cyclo",
+    "spec1M", "spec200k", "specdelta", "spec25k",
+    "acf_full", "acf_200k", "ifreq_acf", "envvar", "ifreq_hist", "papr",
+]
+
+
+def _compute_class_means(
+    sources: dict[str, list[np.ndarray]], max_per_class: int = 200,
+) -> dict[str, np.ndarray]:
+    """Compute per-class mean feature vector (N_CHANNELS, N_IQ)."""
+    rng = np.random.default_rng(42)
+    means: dict[str, np.ndarray] = {}
+    for cls, samples in sources.items():
+        if not samples:
+            continue
+        if len(samples) > max_per_class:
+            idx = rng.choice(len(samples), max_per_class, replace=False)
+            samples = [samples[i] for i in idx]
+        feats = np.stack([iq_to_channels(s) for s in samples])
+        means[cls] = feats.mean(axis=0)
+        print(f"    {cls}: {len(samples)} samples → features computed")
+    return means
+
+
+def print_feature_similarity(
+    training: dict[str, list[np.ndarray]],
+    live: dict[str, list[np.ndarray]],
+):
+    print("\nComputing training class means...")
+    train_means = _compute_class_means(training)
+    live_means: dict[str, np.ndarray] = {}
+    if live:
+        print("Computing live class means...")
+        live_means = _compute_class_means(live)
+
+    all_means = train_means
+
+    classes = [c for c in ML_CLASSES if c in all_means]
+    if len(classes) < 2:
+        print("Need at least 2 classes for similarity comparison.")
+        return
+
+    print(f"\n{'='*72}")
+    print("  PAIRWISE COSINE SIMILARITY (all channels, higher = more confused)")
+    print(f"{'='*72}")
+    header = "        " + "  ".join(f"{c:>6s}" for c in classes)
+    print(header)
+    for a in classes:
+        row = f"  {a:>5s} "
+        for b in classes:
+            if b == a:
+                row += "     - "
+            else:
+                va = all_means[a].flatten()
+                vb = all_means[b].flatten()
+                cos = np.dot(va, vb) / (norm(va) * norm(vb) + 1e-12)
+                marker = "*" if cos > 0.95 else " "
+                row += f" {cos:.3f}{marker}"
+        print(row)
+
+    print(f"\n{'='*72}")
+    print("  PER-CHANNEL SIMILARITY (worst training pairs, >0.90 marked <<<)")
+    print(f"{'='*72}")
+    pairs = []
+    for i, a in enumerate(classes):
+        for b in classes[i + 1:]:
+            va = all_means[a].flatten()
+            vb = all_means[b].flatten()
+            cos = np.dot(va, vb) / (norm(va) * norm(vb) + 1e-12)
+            pairs.append((cos, a, b))
+    pairs.sort(reverse=True)
+
+    for overall_cos, a, b in pairs[:6]:
+        print(f"\n  {a} vs {b} (overall: {overall_cos:.4f}):")
+        for ch in range(N_CHANNELS):
+            va = all_means[a][ch]
+            vb = all_means[b][ch]
+            cos = np.dot(va, vb) / (norm(va) * norm(vb) + 1e-12)
+            marker = " <<<" if cos > 0.90 else ""
+            print(f"    {CH_NAMES[ch]:>10s} (ch{ch:2d}): {cos:.4f}{marker}")
+
+    if live_means:
+        print(f"\n{'='*72}")
+        print("  LIVE vs TRAINING (same-class cosine similarity)")
+        print(f"{'='*72}")
+        for cls in sorted(live_means.keys()):
+            if cls not in train_means:
+                print(f"  {cls}: no training data")
+                continue
+            for ch in range(N_CHANNELS):
+                va = live_means[cls][ch]
+                vb = train_means[cls][ch]
+                cos = np.dot(va, vb) / (norm(va) * norm(vb) + 1e-12)
+                if ch == 0:
+                    print(f"\n  {cls}:")
+                gap = " !!!" if cos < 0.5 else ""
+                print(f"    {CH_NAMES[ch]:>10s}: {cos:.4f}{gap}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Compare training vs live IQ data")
-    parser.add_argument("--training", nargs="+", required=True, help="Training .npz files")
+    parser.add_argument("--training", nargs="*", default=[], help="Training .npz files")
     parser.add_argument("--live", nargs="+", required=True, help="Debug capture directories")
+    parser.add_argument("--features", action="store_true",
+                        help="Show per-channel feature similarity instead of IQ metrics")
     args = parser.parse_args()
 
-    print("Loading training data...")
-    training = load_training(args.training)
-    for cls in ML_CLASSES:
-        print(f"  {cls}: {len(training[cls])} samples")
+    training: dict[str, list[np.ndarray]] = {c: [] for c in ML_CLASSES}
+    if args.training:
+        print("Loading training data...")
+        training = load_training(args.training)
+        for cls in ML_CLASSES:
+            if training[cls]:
+                print(f"  {cls}: {len(training[cls])} samples")
+    else:
+        print("No training data specified — showing live metrics only.")
 
     print("\nLoading live captures...")
     live = load_live(args.live)
     for cls, samples in live.items():
         print(f"  {cls}: {len(samples)} samples")
 
-    print_comparison(training, live)
+    if args.features:
+        print_feature_similarity(training, live)
+    else:
+        print_comparison(training, live)
 
 
 if __name__ == "__main__":

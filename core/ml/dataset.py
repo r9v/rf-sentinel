@@ -83,8 +83,9 @@ def precompute_features(npz_paths: list[str]) -> tuple[str, str]:
 
 def augment_channels(channels: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     """Tensor-level augmentation on precomputed (C, N) feature channels."""
-    # Time roll (circular shift up to 25%)
     n = channels.shape[1]
+
+    # Time roll (circular shift up to 25%)
     shift = rng.integers(-n // 4, n // 4)
     channels = np.roll(channels, shift, axis=1)
 
@@ -95,6 +96,17 @@ def augment_channels(channels: np.ndarray, rng: np.random.Generator) -> np.ndarr
     # Additive noise per channel
     noise_std = rng.uniform(0.01, 0.05)
     channels = channels + rng.standard_normal(channels.shape).astype(np.float32) * noise_std
+
+    # DC spike injection — simulates RTL-SDR hardware DC offset at center bin.
+    # Applied after roll so spike stays fixed at DC regardless of time shift.
+    # Live data shows dc_ratio 2–40x; in normalized log-spectrum that's ~1–5 σ.
+    if rng.random() < 0.5:
+        dc_bin = n // 2
+        spike = rng.uniform(1.0, 5.0)
+        for ch in (5, 6, 7, 9):  # cyclostationary + 3 spectrum resolutions
+            channels[ch, dc_bin] += spike
+            for offset, atten in [(1, 0.3), (-1, 0.3), (2, 0.1), (-2, 0.1)]:
+                channels[ch, dc_bin + offset] += spike * atten
 
     return channels
 

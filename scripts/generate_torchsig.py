@@ -42,8 +42,8 @@ OUR_CLASSES = (
     "lora", "adsb", "noise",
 )
 
-TORCHSIG_CLASSES = {"fm", "am", "nfm", "ofdm", "tdma"}
-CUSTOM_CLASSES = {"lora", "adsb", "noise"}
+TORCHSIG_CLASSES = {"fm", "am", "nfm", "ofdm", "tdma", "lora"}
+CUSTOM_CLASSES = {"adsb", "noise"}
 
 _IDX = {c: i for i, c in enumerate(OUR_CLASSES)}
 
@@ -83,6 +83,11 @@ _TORCHSIG_CONFIG: dict[str, dict] = {
         "bw_min": 10_000, "bw_max": 100_000,
         "center_jitter": 0.10,
     },
+    "lora": {
+        "generators": ["chirpss"],
+        "bw_min": 125_000, "bw_max": 250_000,
+        "center_jitter": 0.05,
+    },
 }
 
 
@@ -120,27 +125,6 @@ def _augment(iq: np.ndarray, rng: np.random.Generator,
     iq = iq * np.exp(1j * rng.uniform(0, 2 * np.pi))
     return _unit_power(iq)
 
-
-def gen_lora(rng: np.random.Generator) -> np.ndarray:
-    sf = rng.integers(7, 13)
-    bw = rng.choice([125e3, 250e3])
-    n_chips = 2 ** sf
-    chirp_duration = n_chips / bw
-    spc = max(4, int(SAMPLE_RATE * chirp_duration))
-    iq = np.zeros(N_IQ + spc, dtype=np.complex64)
-    pos = 0
-    while pos < N_IQ:
-        symbol = rng.integers(0, n_chips)
-        f_start = -bw / 2 + (symbol / n_chips) * bw
-        t = np.arange(spc) / SAMPLE_RATE
-        freq = f_start + (bw / chirp_duration) * t
-        freq = ((freq + bw / 2) % bw) - bw / 2
-        phase = 2 * np.pi * np.cumsum(freq) / SAMPLE_RATE
-        chirp = np.exp(1j * phase).astype(np.complex64)
-        end = min(pos + spc, len(iq))
-        iq[pos:end] = chirp[:end - pos]
-        pos += spc
-    return iq[:N_IQ]
 
 
 def gen_adsb(rng: np.random.Generator) -> np.ndarray:
@@ -200,7 +184,6 @@ def gen_adsb(rng: np.random.Generator) -> np.ndarray:
 
 # Protocol generator dispatch: class_name → (generator_fn, snr_lo, snr_hi)
 _PROTOCOL_GENERATORS: dict[str, tuple] = {
-    "lora":   (gen_lora,  -20, 15),
     "adsb":   (gen_adsb,    5, 30),
 }
 

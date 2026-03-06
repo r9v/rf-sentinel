@@ -31,8 +31,7 @@ RADIOML_CLASSES = [
 
 RADIOML_TO_OURS = {
     "FM": "fm",
-    "AM-DSB-WC": "am",
-    "AM-DSB-SC": "am",
+    # AM-DSB dropped — RadioML AM has broken IQ balance (14:1 vs real 1:1)
     "GMSK": "nfm",
     "OOK": "tdma",
     "OQPSK": "tdma",
