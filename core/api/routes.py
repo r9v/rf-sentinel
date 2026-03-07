@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from core.api.models import ScanRequest, LiveRequest, RetuneRequest, AudioToggleRequest, VfoRequest, RecordStartRequest, CaptureRequest, BookmarkRequest
+from core.api.models import ScanRequest, LiveRequest, RetuneRequest, AudioToggleRequest, VfoRequest, RecordStartRequest, BookmarkRequest
 from core.api.runner import JobRunner
 
 
@@ -86,20 +86,6 @@ def create_routes(runner: JobRunner) -> APIRouter:
         if db_delete_rec(rec_id):
             return {"status": "deleted"}
         return JSONResponse({"error": "Recording not found"}, status_code=404)
-
-    @router.post("/api/live/capture")
-    async def toggle_capture(req: CaptureRequest):
-        from core.ml.inference import enable_capture, disable_capture, capture_active
-        if req.enabled:
-            enable_capture(req.count, vfo_freq_hz=runner.live.vfo_freq_hz, label=req.label)
-        else:
-            disable_capture()
-        return {"capturing": capture_active()}
-
-    @router.get("/api/live/capture")
-    async def capture_status():
-        from core.ml.inference import capture_active
-        return {"capturing": capture_active()}
 
     @router.post("/api/jobs/{job_id}/cancel")
     async def cancel_job(job_id: str):

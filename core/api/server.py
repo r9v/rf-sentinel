@@ -49,10 +49,6 @@ async def _startup() -> None:
     set_log_callback(ws.log_callback)
     set_audio_callback(ws.audio_callback)
     set_job_status_callback(ws.job_status_callback)
-    from core.ml.inference import get_classifier
-    clf = get_classifier()
-    if clf.available:
-        logger.info("ML classifier loaded")
     logger.info("RFSentinel server started (audio support enabled)")
 
 

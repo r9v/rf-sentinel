@@ -325,12 +325,7 @@ class LiveSession:
         if self._peak_tracker is None:
             self._peak_tracker = PeakTracker()
         tracked = self._peak_tracker.update(raw_peaks, result.freqs_mhz, smoothed)
-        classified = classify_peaks(
-            result.freqs_mhz, smoothed, tracked,
-            iq_samples=capture.samples,
-            sample_rate=capture.config.sample_rate,
-            center_freq_hz=capture.config.center_freq,
-        )
+        classified = classify_peaks(result.freqs_mhz, smoothed, tracked)
 
         payload = json.dumps({
             "type": "spectrum",

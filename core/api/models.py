@@ -59,12 +59,6 @@ class RecordStartRequest(BaseModel):
     bandwidth_khz: Optional[int] = Field(None, description="Bandwidth in kHz (narrow mode)")
 
 
-class CaptureRequest(BaseModel):
-    """Toggle ML debug snippet capture."""
-    enabled: bool = Field(..., description="Enable or disable snippet capture")
-    count: int = Field(20, ge=1, le=200, description="Number of snippets to capture")
-    label: str = Field("live", description="Filename prefix for saved snippets")
-
 
 class BookmarkRequest(BaseModel):
     """Create a frequency bookmark."""

@@ -5,9 +5,6 @@ numpy>=1.23
 scipy>=1.9
 matplotlib>=3.6
 
-# ML inference
-onnxruntime>=1.16
-
 # API server
 fastapi>=0.111
 uvicorn>=0.30
