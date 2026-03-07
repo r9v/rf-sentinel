@@ -5,7 +5,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 [project]
 name = "rfsentinel"
 version = "0.1.0"
-description = "RF spectrum monitoring & signal classification platform"
+description = "RF spectrum monitoring platform"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
@@ -13,25 +13,18 @@ dependencies = [
     "pyrtlsdr>=0.3.0",
     "numpy>=1.23",
     "scipy>=1.9",
-    "matplotlib>=3.6",
 ]
 
 [project.optional-dependencies]
-ml = [
-    "scikit-learn>=1.2",
-    "torch>=2.0",
-]
 ui = [
     "fastapi>=0.111",
     "uvicorn>=0.30",
+    "pydantic>=2.0",
 ]
 dev = [
     "pytest>=7.0",
     "ruff>=0.1",
 ]
-
-[project.scripts]
-rfsentinel = "core.cli:main"
 
 [tool.ruff]
 line-length = 100

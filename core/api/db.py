@@ -31,32 +31,6 @@ CREATE TABLE IF NOT EXISTS scans (
     waterfall_data BLOB
 );
 CREATE INDEX IF NOT EXISTS idx_scans_created_at ON scans(created_at);
-
-CREATE TABLE IF NOT EXISTS recordings (
-    id             TEXT PRIMARY KEY,
-    mode           TEXT NOT NULL,
-    filename       TEXT NOT NULL,
-    freq_mhz       REAL NOT NULL,
-    bandwidth_khz  REAL,
-    sample_rate    REAL NOT NULL,
-    gain           REAL NOT NULL,
-    start_mhz      REAL NOT NULL,
-    stop_mhz       REAL NOT NULL,
-    num_samples    INTEGER NOT NULL,
-    file_size      INTEGER NOT NULL,
-    created_at     TEXT NOT NULL,
-    stopped_at     TEXT NOT NULL,
-    duration_s     REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_recordings_created_at ON recordings(created_at);
-
-CREATE TABLE IF NOT EXISTS bookmarks (
-    id         TEXT PRIMARY KEY,
-    label      TEXT NOT NULL,
-    freq_mhz   REAL NOT NULL,
-    notes      TEXT DEFAULT '',
-    created_at TEXT NOT NULL
-);
 """
 
 
@@ -69,13 +43,8 @@ def init(db_path: Path | None = None) -> None:
     _conn.execute("PRAGMA journal_mode=WAL")
     _conn.execute("PRAGMA foreign_keys=ON")
     _conn.executescript(_SCHEMA)
-    _migrate(_conn)
     _conn.commit()
     logger.info("Database ready: %s", path)
-
-
-def _migrate(conn: sqlite3.Connection) -> None:
-    pass
 
 
 def _compress(data: dict) -> bytes:
@@ -162,7 +131,4 @@ def get_scan(scan_id: str) -> dict | None:
         "created_at": row["created_at"],
         "duration_s": row["duration_s"],
     }
-
-
-
 
