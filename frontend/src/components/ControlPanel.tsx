@@ -22,6 +22,8 @@ interface Props {
   onRecord: (mode: 'wide' | 'narrow', bandwidthKhz?: number) => void;
   bookmarks: Bookmark[];
   setBookmarks: Dispatch<SetStateAction<Bookmark[]>>;
+  narrowBw: number;
+  onNarrowBwChange: (bw: number) => void;
 }
 
 const submitBtn = 'w-full py-2.5 rounded-lg font-medium text-sm transition-all';
@@ -52,7 +54,7 @@ function ScanInfo({ bandwidth, numChunks, duration }: { bandwidth: number; numCh
   );
 }
 
-export default forwardRef<ControlPanelHandle, Props>(function ControlPanel({ liveActive, onLiveToggle, audioEnabled, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange, recording, onRecord, bookmarks, setBookmarks }, ref) {
+export default forwardRef<ControlPanelHandle, Props>(function ControlPanel({ liveActive, onLiveToggle, audioEnabled, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange, recording, onRecord, bookmarks, setBookmarks, narrowBw, onNarrowBwChange }, ref) {
   const [mode, setMode] = useState<Mode>('live');
   const [startMhz, setStartMhz] = useState(85.0);
   const [stopMhz, setStopMhz] = useState(140.0);
@@ -68,7 +70,6 @@ export default forwardRef<ControlPanelHandle, Props>(function ControlPanel({ liv
   const [bkLabel, setBkLabel] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [inputsOpen, setInputsOpen] = useState(true);
-  const [narrowBw, setNarrowBw] = useState<number>(25);
   const [capturing, setCapturing] = useState(false);
   const [captureLabel, setCaptureLabel] = useState('live');
   const lastLiveParams = useRef('');
@@ -407,7 +408,7 @@ export default forwardRef<ControlPanelHandle, Props>(function ControlPanel({ liv
               <span className="text-[10px] text-gray-500">BW</span>
               <select
                 value={narrowBw}
-                onChange={e => setNarrowBw(+e.target.value)}
+                onChange={e => onNarrowBwChange(+e.target.value)}
                 className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:border-cyan-500 focus:outline-none"
               >
                 {NARROW_BW_OPTIONS.map(bw => (

@@ -154,7 +154,7 @@ function Header({ liveActive, audioEnabled, recording, serverOnline }: {
   );
 }
 
-function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange, jobs, selectedJob, onSelectJob, onCancelJob, onDeleteScan, recording, onRecord, bookmarks, setBookmarks }: {
+function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange, jobs, selectedJob, onSelectJob, onCancelJob, onDeleteScan, recording, onRecord, bookmarks, setBookmarks, narrowBw, onNarrowBwChange }: {
   controlPanelRef: React.Ref<ControlPanelHandle>;
   liveActive: boolean;
   audioEnabled: boolean;
@@ -172,6 +172,8 @@ function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAu
   onRecord: (mode: 'wide' | 'narrow', bandwidthKhz?: number) => void;
   bookmarks: Bookmark[];
   setBookmarks: React.Dispatch<React.SetStateAction<Bookmark[]>>;
+  narrowBw: number;
+  onNarrowBwChange: (bw: number) => void;
 }) {
   return (
     <aside className="w-72 border-r border-gray-800 flex flex-col">
@@ -189,6 +191,8 @@ function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAu
           onRecord={onRecord}
           bookmarks={bookmarks}
           setBookmarks={setBookmarks}
+          narrowBw={narrowBw}
+          onNarrowBwChange={onNarrowBwChange}
         />
       </div>
       <div className="flex-1 overflow-y-auto p-3">
@@ -226,7 +230,7 @@ function SignalPanel({ peaks, vfoFreq, onPeakClick, showSteady, showTransient, o
   );
 }
 
-function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onClear, vfoFreq, onFreqClick, onScanFreqClick, peakFilter, bookmarks }: {
+function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onClear, vfoFreq, onFreqClick, onScanFreqClick, peakFilter, bookmarks, narrowBw }: {
   liveActive: boolean;
   liveFrame: SpectrumFrame | null;
   selectedJob: JobInfo | null;
@@ -238,6 +242,7 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
   onScanFreqClick: (freq_mhz: number) => void;
   peakFilter: (pk: { transient?: boolean }) => boolean;
   bookmarks: Bookmark[];
+  narrowBw: number;
 }) {
   const [chartView, setChartView] = useState<ChartView | null>(null);
 
@@ -247,7 +252,7 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
         {liveActive || liveFrame ? (
           <>
             <div className="flex-[2] min-h-0">
-              <SpectrumChart frame={liveFrame} mode="live" vfoFreq={vfoFreq} onFreqClick={onFreqClick} onViewChange={setChartView} bookmarks={bookmarks} />
+              <SpectrumChart frame={liveFrame} mode="live" vfoFreq={vfoFreq} onFreqClick={onFreqClick} onViewChange={setChartView} bookmarks={bookmarks} narrowBw={narrowBw} />
             </div>
             <div className="flex-1 min-h-0 border-t border-gray-800/50">
               <WaterfallCanvas frame={liveFrame} view={chartView} bookmarks={bookmarks} />
@@ -275,6 +280,7 @@ export default function App() {
   const [showTransient, setShowTransient] = useState(true);
   const [vfoFreq, setVfoFreq] = useState<number | null>(null);
   const [recording, setRecording] = useState<string | null>(null);
+  const [narrowBw, setNarrowBw] = useState(25);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const audioRef = useRef(audio);
   audioRef.current = audio;
@@ -407,6 +413,8 @@ export default function App() {
           onRecord={handleRecord}
           bookmarks={bookmarks}
           setBookmarks={setBookmarks}
+          narrowBw={narrowBw}
+          onNarrowBwChange={setNarrowBw}
         />
         <MainContent
           liveActive={liveActive}
@@ -420,6 +428,7 @@ export default function App() {
           onScanFreqClick={handleScanPeakClick}
           peakFilter={peakFilter}
           bookmarks={bookmarks}
+          narrowBw={narrowBw}
         />
         <SignalPanel
           peaks={liveActive ? (liveFrame?.peaks || []) : (selectedJob?.status === 'complete' ? selectedJob.params.peaks ?? [] : [])}
