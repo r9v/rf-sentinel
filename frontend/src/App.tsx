@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { useWebSocket, LogEntry } from './hooks/useWebSocket';
 import { useAudioPlayer } from './hooks/useAudioPlayer';
-import { JobInfo, setVfo, toggleAudio, getScan, cancelJob, deleteScan, startRecording, stopRecording, listBookmarks, type Bookmark } from './api';
+import { JobInfo, setVfo, toggleAudio, getScan, cancelJob, deleteScan, startRecording, stopRecording } from './api';
 import ControlPanel, { ControlPanelHandle } from './components/ControlPanel';
 import LogConsole from './components/LogConsole';
 import JobList from './components/JobList';
@@ -154,7 +154,7 @@ function Header({ liveActive, audioEnabled, recording, serverOnline }: {
   );
 }
 
-function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange, jobs, selectedJob, onSelectJob, onCancelJob, onDeleteScan, recording, onRecord, bookmarks, setBookmarks, narrowBw, onNarrowBwChange }: {
+function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAudioToggle, onVolumeChange, vfoFreq, onVfoChange, jobs, selectedJob, onSelectJob, onCancelJob, onDeleteScan, recording, onRecord, narrowBw, onNarrowBwChange }: {
   controlPanelRef: React.Ref<ControlPanelHandle>;
   liveActive: boolean;
   audioEnabled: boolean;
@@ -170,8 +170,6 @@ function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAu
   onDeleteScan: (scanId: string) => void;
   recording: string | null;
   onRecord: (mode: 'wide' | 'narrow', bandwidthKhz?: number) => void;
-  bookmarks: Bookmark[];
-  setBookmarks: React.Dispatch<React.SetStateAction<Bookmark[]>>;
   narrowBw: number;
   onNarrowBwChange: (bw: number) => void;
 }) {
@@ -189,8 +187,6 @@ function Sidebar({ controlPanelRef, liveActive, audioEnabled, onLiveToggle, onAu
           onVfoChange={onVfoChange}
           recording={recording}
           onRecord={onRecord}
-          bookmarks={bookmarks}
-          setBookmarks={setBookmarks}
           narrowBw={narrowBw}
           onNarrowBwChange={onNarrowBwChange}
         />
@@ -230,7 +226,7 @@ function SignalPanel({ peaks, vfoFreq, onPeakClick, showSteady, showTransient, o
   );
 }
 
-function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onClear, vfoFreq, onFreqClick, onScanFreqClick, peakFilter, bookmarks, narrowBw }: {
+function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onClear, vfoFreq, onFreqClick, onScanFreqClick, peakFilter, narrowBw }: {
   liveActive: boolean;
   liveFrame: SpectrumFrame | null;
   selectedJob: JobInfo | null;
@@ -241,7 +237,6 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
   onFreqClick: (freq_mhz: number) => void;
   onScanFreqClick: (freq_mhz: number) => void;
   peakFilter: (pk: { transient?: boolean }) => boolean;
-  bookmarks: Bookmark[];
   narrowBw: number;
 }) {
   const [chartView, setChartView] = useState<ChartView | null>(null);
@@ -252,14 +247,14 @@ function MainContent({ liveActive, liveFrame, selectedJob, logs, connected, onCl
         {liveActive || liveFrame ? (
           <>
             <div className="flex-[2] min-h-0">
-              <SpectrumChart frame={liveFrame} mode="live" vfoFreq={vfoFreq} onFreqClick={onFreqClick} onViewChange={setChartView} bookmarks={bookmarks} narrowBw={narrowBw} />
+              <SpectrumChart frame={liveFrame} mode="live" vfoFreq={vfoFreq} onFreqClick={onFreqClick} onViewChange={setChartView} narrowBw={narrowBw} />
             </div>
             <div className="flex-1 min-h-0 border-t border-gray-800/50">
-              <WaterfallCanvas frame={liveFrame} view={chartView} bookmarks={bookmarks} />
+              <WaterfallCanvas frame={liveFrame} view={chartView} />
             </div>
           </>
         ) : (
-          <ResultView job={selectedJob} onFreqClick={onScanFreqClick} peakFilter={peakFilter} bookmarks={bookmarks} />
+          <ResultView job={selectedJob} onFreqClick={onScanFreqClick} peakFilter={peakFilter} />
         )}
       </div>
       <LogConsole logs={logs} connected={connected} onClear={onClear} />
@@ -281,15 +276,10 @@ export default function App() {
   const [vfoFreq, setVfoFreq] = useState<number | null>(null);
   const [recording, setRecording] = useState<string | null>(null);
   const [narrowBw, setNarrowBw] = useState(25);
-  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const audioRef = useRef(audio);
   audioRef.current = audio;
   const vfoRef = useRef<number | null>(null);
   vfoRef.current = vfoFreq;
-
-  useEffect(() => {
-    listBookmarks().then(setBookmarks).catch(() => {});
-  }, []);
 
   const handleSpectrum = useCallback((data: any) => {
     const freqs: number[] = data.freqs_mhz;
@@ -411,8 +401,6 @@ export default function App() {
           onDeleteScan={handleDeleteScan}
           recording={recording}
           onRecord={handleRecord}
-          bookmarks={bookmarks}
-          setBookmarks={setBookmarks}
           narrowBw={narrowBw}
           onNarrowBwChange={setNarrowBw}
         />
@@ -427,7 +415,6 @@ export default function App() {
           onFreqClick={handleFreqClick}
           onScanFreqClick={handleScanPeakClick}
           peakFilter={peakFilter}
-          bookmarks={bookmarks}
           narrowBw={narrowBw}
         />
         <SignalPanel

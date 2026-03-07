@@ -60,13 +60,6 @@ class RecordStartRequest(BaseModel):
 
 
 
-class BookmarkRequest(BaseModel):
-    """Create a frequency bookmark."""
-    label: str = Field(..., min_length=1, max_length=100)
-    freq_mhz: float = Field(..., ge=24.0, le=1766.0)
-    notes: str = Field("", max_length=500)
-
-
 class JobInfo(BaseModel):
     """Job status response."""
     id: str

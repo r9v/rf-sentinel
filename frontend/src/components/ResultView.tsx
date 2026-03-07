@@ -8,7 +8,6 @@ interface Props {
   job: JobInfo | null;
   onFreqClick?: (freq_mhz: number) => void;
   peakFilter?: (pk: { transient?: boolean }) => boolean;
-  bookmarks?: {label: string; freq_mhz: number}[];
 }
 
 function EmptyState() {
@@ -68,7 +67,7 @@ function JobHeader({ job }: { job: JobInfo }) {
   );
 }
 
-function ScanResult({ job, onFreqClick, peakFilter, bookmarks }: { job: JobInfo; onFreqClick?: (freq_mhz: number) => void; peakFilter?: (pk: { transient?: boolean }) => boolean; bookmarks?: {label: string; freq_mhz: number}[] }) {
+function ScanResult({ job, onFreqClick, peakFilter }: { job: JobInfo; onFreqClick?: (freq_mhz: number) => void; peakFilter?: (pk: { transient?: boolean }) => boolean }) {
   const [chartView, setChartView] = useState<ChartView | null>(null);
   const [dataDbRange, setDataDbRange] = useState<[number, number]>([-120, -20]);
   const [dbRange, setDbRange] = useState<[number, number] | null>(null);
@@ -99,12 +98,12 @@ function ScanResult({ job, onFreqClick, peakFilter, bookmarks }: { job: JobInfo;
     <div className="flex flex-col h-full">
       {frame && (
         <div className="flex-[2] min-h-0">
-          <SpectrumChart frame={frame} mode="scan" onFreqClick={onFreqClick} onViewChange={setChartView} bookmarks={bookmarks} />
+          <SpectrumChart frame={frame} mode="scan" onFreqClick={onFreqClick} onViewChange={setChartView} />
         </div>
       )}
       <div className="flex-1 min-h-0 flex">
         <div className="flex-1 min-w-0">
-          <WaterfallCanvas resultData={wd} view={chartView} dbRange={dbRange} onDataDbRange={onDataDbRange} bookmarks={bookmarks} />
+          <WaterfallCanvas resultData={wd} view={chartView} dbRange={dbRange} onDataDbRange={onDataDbRange} />
         </div>
         <div className="flex-shrink-0 py-1" style={{ width: 24 }}>
           <DualRangeSlider
@@ -120,7 +119,7 @@ function ScanResult({ job, onFreqClick, peakFilter, bookmarks }: { job: JobInfo;
   );
 }
 
-export default function ResultView({ job, onFreqClick, peakFilter, bookmarks }: Props) {
+export default function ResultView({ job, onFreqClick, peakFilter }: Props) {
   if (!job) return <EmptyState />;
   if (job.status === 'pending' || job.status === 'running') return <LoadingState job={job} />;
   if (job.status === 'error') return <ErrorState job={job} />;
@@ -129,7 +128,7 @@ export default function ResultView({ job, onFreqClick, peakFilter, bookmarks }: 
     <div className="flex flex-col h-full">
       <JobHeader job={job} />
       <div className="flex-1 min-h-0">
-        <ScanResult job={job} onFreqClick={onFreqClick} peakFilter={peakFilter} bookmarks={bookmarks} />
+        <ScanResult job={job} onFreqClick={onFreqClick} peakFilter={peakFilter} />
       </div>
     </div>
   );

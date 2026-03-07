@@ -7,7 +7,6 @@ interface Props {
   resultData?: { freqs_mhz: number[]; power_db: number[][]; duration_s?: number } | null;
   dbRange?: [number, number] | null;
   onDataDbRange?: (min: number, max: number) => void;
-  bookmarks?: {label: string; freq_mhz: number}[];
 }
 
 const TARGET_SECONDS = 60;
@@ -43,14 +42,12 @@ interface Row {
   cacheKey: number;
 }
 
-export default function WaterfallCanvas({ frame, view, resultData, dbRange, onDataDbRange, bookmarks }: Props) {
+export default function WaterfallCanvas({ frame, view, resultData, dbRange, onDataDbRange }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 400, h: 192 });
   const dbMinRef = useRef(-120);
   const dbMaxRef = useRef(-20);
-  const bookmarksRef = useRef<{label: string; freq_mhz: number}[]>([]);
-  bookmarksRef.current = bookmarks || [];
   const viewRef = useRef<ChartView | null>(null);
   const rowsRef = useRef<Row[]>([]);
   const wfRef = useRef<{ imgData: ImageData; u32: Uint32Array; w: number; h: number } | null>(null);
@@ -128,7 +125,7 @@ export default function WaterfallCanvas({ frame, view, resultData, dbRange, onDa
   useEffect(() => {
     if (!resultData?.freqs_mhz.length || !resultData.power_db.length) return;
     renderResult();
-  }, [resultData, size, view?.xStart, view?.xEnd, view?.padLeft, view?.padRight, dbRange?.[0], dbRange?.[1], bookmarks]);
+  }, [resultData, size, view?.xStart, view?.xEnd, view?.padLeft, view?.padRight, dbRange?.[0], dbRange?.[1]]);
 
   function renderResult() {
     if (!resultData?.freqs_mhz.length || !resultData.power_db.length) return;
@@ -214,7 +211,6 @@ export default function WaterfallCanvas({ frame, view, resultData, dbRange, onDa
       ctx.stroke();
       ctx.fillText(formatTick(t, yTicks.step) + 's', padLeft - 5 * dpr, y);
     }
-    drawBookmarkOverlay(ctx, bookmarksRef.current, xStart, xEnd, padLeft, dataW, padTop, dataH);
   }
 
   function getDataMetrics() {
@@ -251,7 +247,6 @@ export default function WaterfallCanvas({ frame, view, resultData, dbRange, onDa
     }
 
     blit(ctx, wf.imgData, m.dataLeft, m.devH);
-    drawBookmarkOverlay(ctx, bookmarksRef.current, v.xStart, v.xEnd, m.dataLeft, m.dataW, 0, m.devH);
   }
 
   function fullRedraw() {
@@ -270,7 +265,6 @@ export default function WaterfallCanvas({ frame, view, resultData, dbRange, onDa
 
     if (!rows.length) {
       blit(ctx, wf.imgData, m.dataLeft, m.devH);
-      drawBookmarkOverlay(ctx, bookmarksRef.current, v.xStart, v.xEnd, m.dataLeft, m.dataW, 0, m.devH);
       return;
     }
 
@@ -309,7 +303,6 @@ export default function WaterfallCanvas({ frame, view, resultData, dbRange, onDa
     }
 
     blit(ctx, wf.imgData, m.dataLeft, m.devH);
-    drawBookmarkOverlay(ctx, bookmarksRef.current, v.xStart, v.xEnd, m.dataLeft, m.dataW, 0, m.devH);
   }
 
   function blit(ctx: CanvasRenderingContext2D, imgData: ImageData, dataLeft: number, devH: number) {
@@ -382,34 +375,3 @@ function interpPower(freqs: number[], power: number[], freq: number): number {
   return power[lo] + t * (power[hi] - power[lo]);
 }
 
-function drawBookmarkOverlay(
-  ctx: CanvasRenderingContext2D,
-  bookmarks: {label: string; freq_mhz: number}[],
-  xStart: number, xEnd: number,
-  dataLeft: number, dataW: number,
-  yTop: number, dataH: number,
-) {
-  if (!bookmarks.length || dataW <= 0) return;
-  const dpr = window.devicePixelRatio || 1;
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(dataLeft, yTop, dataW, dataH);
-  ctx.clip();
-  ctx.strokeStyle = 'rgba(255,200,50,0.4)';
-  ctx.lineWidth = 1 * dpr;
-  ctx.setLineDash([3 * dpr, 3 * dpr]);
-  ctx.font = `${Math.round(8 * dpr)}px monospace`;
-  ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(255,200,50,0.7)';
-  for (const bk of bookmarks) {
-    const frac = (bk.freq_mhz - xStart) / (xEnd - xStart);
-    if (frac < 0 || frac > 1) continue;
-    const x = dataLeft + frac * dataW;
-    ctx.beginPath();
-    ctx.moveTo(x, yTop);
-    ctx.lineTo(x, yTop + dataH);
-    ctx.stroke();
-    ctx.fillText(bk.label, x, yTop + 10 * dpr);
-  }
-  ctx.restore();
-}

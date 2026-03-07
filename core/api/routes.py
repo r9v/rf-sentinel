@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from core.api.models import ScanRequest, LiveRequest, RetuneRequest, AudioToggleRequest, VfoRequest, RecordStartRequest, BookmarkRequest
+from core.api.models import ScanRequest, LiveRequest, RetuneRequest, AudioToggleRequest, VfoRequest, RecordStartRequest
 from core.api.runner import JobRunner
 
 
@@ -113,34 +113,5 @@ def create_routes(runner: JobRunner) -> APIRouter:
         if db_delete(scan_id):
             return {"status": "deleted"}
         return JSONResponse({"error": "Scan not found"}, status_code=404)
-
-    # ── Bookmarks ──────────────────────────────────────────
-
-    @router.get("/api/bookmarks")
-    async def get_bookmarks():
-        from core.api.db import list_bookmarks
-        return list_bookmarks()
-
-    @router.post("/api/bookmarks")
-    async def create_bookmark(req: BookmarkRequest):
-        import uuid
-        from core.api.db import save_bookmark
-        bk_id = str(uuid.uuid4())
-        save_bookmark(bk_id, req.label, req.freq_mhz, req.notes)
-        return {"id": bk_id, "status": "saved"}
-
-    @router.put("/api/bookmarks/{bk_id}")
-    async def update_bookmark(bk_id: str, req: BookmarkRequest):
-        from core.api.db import update_bookmark as db_update_bk
-        if db_update_bk(bk_id, req.label, req.freq_mhz, req.notes):
-            return {"status": "updated"}
-        return JSONResponse({"error": "Bookmark not found"}, status_code=404)
-
-    @router.delete("/api/bookmarks/{bk_id}")
-    async def remove_bookmark(bk_id: str):
-        from core.api.db import delete_bookmark
-        if delete_bookmark(bk_id):
-            return {"status": "deleted"}
-        return JSONResponse({"error": "Bookmark not found"}, status_code=404)
 
     return router

@@ -65,16 +65,6 @@ export async function setVfo(freq_mhz: number): Promise<{ vfo_freq_mhz: number }
   return (await post('/api/live/vfo', { freq_mhz })).json();
 }
 
-export async function toggleCapture(enabled: boolean, count = 20, label = 'live'): Promise<{ capturing: boolean }> {
-  return (await post('/api/live/capture', { enabled, count, label })).json();
-}
-
-export async function getCaptureStatus(): Promise<{ capturing: boolean }> {
-  const res = await fetch(`${API}/api/live/capture`);
-  if (!res.ok) throw new Error(`${res.status}`);
-  return res.json();
-}
-
 // ── Scan history ──────────────────────────────────────
 
 export interface ScanSummary {
@@ -157,43 +147,4 @@ export async function deleteRecording(recId: string): Promise<{ status: string }
   return res.json();
 }
 
-// ── Bookmarks ────────────────────────────────────────
-
-export interface Bookmark {
-  id: string;
-  label: string;
-  freq_mhz: number;
-  notes: string;
-  created_at: string;
-}
-
-export async function listBookmarks(): Promise<Bookmark[]> {
-  const res = await fetch(`${API}/api/bookmarks`);
-  if (!res.ok) throw new Error(`${res.status}`);
-  return res.json();
-}
-
-export async function saveBookmark(
-  label: string, freq_mhz: number, notes = '',
-): Promise<{ id: string }> {
-  return (await post('/api/bookmarks', { label, freq_mhz, notes })).json();
-}
-
-export async function updateBookmark(
-  id: string, label: string, freq_mhz: number, notes = '',
-): Promise<{ status: string }> {
-  const res = await fetch(`${API}/api/bookmarks/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label, freq_mhz, notes }),
-  });
-  if (!res.ok) throw new Error(`${res.status}`);
-  return res.json();
-}
-
-export async function deleteBookmark(id: string): Promise<{ status: string }> {
-  const res = await fetch(`${API}/api/bookmarks/${id}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error(`${res.status}`);
-  return res.json();
-}
 
