@@ -1,5 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import type { SpectrumFrame, ChartView } from './SpectrumChart';
+import { BG, BG_U32 } from './theme';
+import { buildLut } from './colormap';
 
 interface Props {
   frame?: SpectrumFrame | null;
@@ -10,29 +12,7 @@ interface Props {
 }
 
 const TARGET_SECONDS = 60;
-const BG_R = 10, BG_G = 14, BG_B = 26;
-const BG_U32 = (255 << 24) | (BG_B << 16) | (BG_G << 8) | BG_R;
-
 const LUT = buildLut();
-function buildLut(): Uint8Array {
-  const stops = [
-    [0, 0, 4], [40, 11, 84], [101, 21, 110], [159, 42, 99],
-    [212, 72, 66], [245, 125, 21], [250, 193, 39], [252, 255, 164],
-  ];
-  const n = stops.length - 1;
-  const out = new Uint8Array(256 * 4);
-  for (let i = 0; i < 256; i++) {
-    const t = (i / 255) * n;
-    const idx = Math.min(Math.floor(t), n - 1);
-    const f = t - idx;
-    const a = stops[idx], b = stops[idx + 1];
-    out[i * 4] = a[0] + (b[0] - a[0]) * f;
-    out[i * 4 + 1] = a[1] + (b[1] - a[1]) * f;
-    out[i * 4 + 2] = a[2] + (b[2] - a[2]) * f;
-    out[i * 4 + 3] = 255;
-  }
-  return out;
-}
 
 interface Row {
   freqs: number[];
@@ -178,7 +158,7 @@ export default function WaterfallCanvas({ frame, view, resultData, dbRange, onDa
       wf.imgData.data.set(strip, dy * stride);
     }
 
-    ctx.fillStyle = '#0a0e1a';
+    ctx.fillStyle = BG;
     ctx.fillRect(0, 0, devW, devH);
     ctx.putImageData(wf.imgData, padLeft, padTop);
 
@@ -306,7 +286,7 @@ export default function WaterfallCanvas({ frame, view, resultData, dbRange, onDa
   }
 
   function blit(ctx: CanvasRenderingContext2D, imgData: ImageData, dataLeft: number, devH: number) {
-    ctx.fillStyle = '#0a0e1a';
+    ctx.fillStyle = BG;
     ctx.fillRect(0, 0, ctx.canvas.width, devH);
     ctx.putImageData(imgData, dataLeft, 0);
   }
